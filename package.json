@@ -1,0 +1,10 @@
+{
+  "name": "forkcast-scripts",
+  "private": true,
+  "scripts": {
+    "aave:addrs:sepolia": "node -e \"const A=require('@bgd-labs/aave-address-book'); const S=A.AaveV3Sepolia; console.log('PROVIDER=',S.POOL_ADDRESSES_PROVIDER); console.log('POOL=',S.POOL); console.log('DATA_PROVIDER=',S.AAVE_PROTOCOL_DATA_PROVIDER);\""
+  },
+  "devDependencies": {
+    "@bgd-labs/aave-address-book": "^4.36.0"
+  }
+}
