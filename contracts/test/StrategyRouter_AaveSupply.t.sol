@@ -8,6 +8,10 @@ import {UserAccount} from "../src/accounts/UserAccount.sol";
 import {AccountFactory} from "../src/factory/AccountFactory.sol";
 import {StrategyRouter} from "../src/router/StrategyRouter.sol";
 import {IERC20, IERC20Metadata} from "../src/interfaces/IERC20.sol";
+import {
+    IPoolAddressesProvider
+} from "../src/interfaces/aave-v3/IPoolAddressesProvider.sol";
+
 import {IPool} from "../src/interfaces/aave-v3/IPool.sol";
 import {
     IAaveProtocolDataProvider
@@ -16,10 +20,11 @@ import {
 contract StrategyRouterAaveSupply is Test {
     // Aave
     IPool public aavePool;
-    address public poolAddr;
+    // address public poolAddr;
     IAaveProtocolDataProvider public dataProvider;
     address public dataAddr;
     address public AAVE;
+    address public providerAddr;
 
     // Actor
     address public user;
@@ -34,15 +39,16 @@ contract StrategyRouterAaveSupply is Test {
         string memory rpc = vm.envString("SEPOLIA_RPC_URL");
         vm.createSelectFork(rpc);
 
-        // Set aave-v3 pool instance
-        poolAddr = vm.envAddress("AAVE_POOL");
-        require(poolAddr != address(0), "POOL missing");
-        aavePool = IPool(poolAddr);
-        vm.label(poolAddr, "AAVE_POOL");
+        // Set aave-v3 AddressesProvider & dervie Pool
+        providerAddr = vm.envAddress("AAVE_ADDRESSES_PROVIDER");
+        require(providerAddr != address(0), "PROVIDER missing");
+        vm.label(providerAddr, "AAVE_PROVIDER");
+        aavePool = IPool(IPoolAddressesProvider(providerAddr).getPool());
+        vm.label(address(aavePool), "AAVE_POOL");
 
         // Set aave-ProtocolDataProvider
         dataAddr = vm.envAddress("AAVE_PROTOCOL_DATA_PROVIDER");
-        require(dataAddr != address(0), "PROVIDER missing");
+        require(dataAddr != address(0), "DATA_PROVIDER missing");
         dataProvider = IAaveProtocolDataProvider(dataAddr);
         vm.label(dataAddr, "DATA_PROVIDER");
 
@@ -66,12 +72,16 @@ contract StrategyRouterAaveSupply is Test {
         // Deploy AccountFactory.sol
         vm.startPrank(admin);
 
-        factory = new AccountFactory(poolAddr);
+        factory = new AccountFactory(providerAddr);
         vm.label(address(factory), "AccountFactory");
         console2.log("Factory : ", vm.toString(address(factory)));
 
         // Deploy StrategyRouter.sol
-        router = new StrategyRouter(poolAddr, address(factory));
+        router = new StrategyRouter(
+            providerAddr,
+            address(factory),
+            address(dataAddr)
+        );
         vm.label(address(router), "StrategyRouter");
         console2.log("Router : ", vm.toString(address(router)));
 
@@ -98,7 +108,7 @@ contract StrategyRouterAaveSupply is Test {
 
         bool ok = IERC20(AAVE).approve(address(router), amtSupplied);
         assertTrue(ok, "approve failed");
-        router.openPosition(AAVE, amtSupplied, AAVE); //borrowAsset 현재는 더미
+        router.openPosition(AAVE, amtSupplied, AAVE, 0); //borrowAsset 현재는 더미
         vm.stopPrank();
 
         ua = factory.accountOf(user);
@@ -115,7 +125,7 @@ contract StrategyRouterAaveSupply is Test {
         vm.startPrank(user);
         bool ok = IERC20(AAVE).approve(address(router), amt);
         assertTrue(ok, "approve failed");
-        router.openPosition(AAVE, amt, AAVE);
+        router.openPosition(AAVE, amt, AAVE, 0);
         vm.stopPrank();
 
         ua = factory.accountOf(user);
@@ -179,14 +189,14 @@ contract StrategyRouterAaveSupply is Test {
         vm.startPrank(user);
         uint256 bal = IERC20(AAVE).balanceOf(user);
         vm.expectRevert();
-        router.openPosition(AAVE, bal, AAVE);
+        router.openPosition(AAVE, bal, AAVE, 0);
         vm.stopPrank();
     }
 
     function test_openPosition_Reverts_ZeroAmount() public {
         vm.startPrank(user);
         vm.expectRevert(StrategyRouter.ZeroAmount.selector);
-        router.openPosition(AAVE, 0, AAVE);
+        router.openPosition(AAVE, 0, AAVE, 0);
         vm.stopPrank();
     }
 }
