@@ -56,6 +56,7 @@ contract UserAccount {
         return IPool(provider.getPool());
     }
 
+    /// @dev aave-v3에서 특정 asset을 amount 만큼 예치
     function supply(
         address asset,
         uint256 amount
@@ -70,6 +71,7 @@ contract UserAccount {
         _pool().supply(asset, amount, address(this), 0);
     }
 
+    /// @dev aave-v3에서 특정 asset을 amount 만큼 차입
     function borrow(
         address asset,
         uint256 amount
@@ -78,6 +80,17 @@ contract UserAccount {
         if (amount == 0) revert ZeroAmount();
 
         _pool().borrow(asset, amount, 2, 0, address(this));
+    }
+
+    /// @dev
+    function pullToOperator(
+        address asset,
+        uint256 amount
+    ) external onlyOperatorOrOwner {
+        if (asset == address(0)) revert ZeroAddress();
+        if (amount == 0) revert ZeroAmount();
+
+        IERC20(asset).transfer(operator, amount);
     }
 
     function getMyAaveData()

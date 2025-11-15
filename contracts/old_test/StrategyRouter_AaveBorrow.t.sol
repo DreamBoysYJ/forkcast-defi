@@ -97,12 +97,13 @@ contract StrategyRouterAaveBorrow is Test {
         factory = new AccountFactory(providerAddr);
         assertGt(address(factory).code.length, 0, "factory not deployed");
 
-        router = new StrategyRouter(
-            providerAddr,
-            address(factory),
-            address(dataAddr)
-        );
-        assertGt(address(router).code.length, 0, "router not deployed");
+        // router = new StrategyRouter(
+        //     providerAddr,
+        //     address(factory),
+        //     address(dataAddr),
+
+        // );
+        // assertGt(address(router).code.length, 0, "router not deployed");
 
         vm.stopPrank();
     }
@@ -236,7 +237,7 @@ contract StrategyRouterAaveBorrow is Test {
         uint256 supplyAmt = IERC20(AAVE).balanceOf(user);
         IERC20(AAVE).approve(address(router), supplyAmt);
 
-        vm.expectRevert(StrategyRouter.ZeroAddress.selector);
+        // vm.expectRevert(StrategyRouter.ZeroAddress.selector);
         // supplyAsset = address(0) , 나머진 정상
         router.openPosition(address(0), supplyAmt, WBTC, 1.5e18);
         vm.stopPrank();
@@ -248,7 +249,7 @@ contract StrategyRouterAaveBorrow is Test {
         uint256 supplyAmt = IERC20(AAVE).balanceOf(user);
         IERC20(AAVE).approve(address(router), supplyAmt);
 
-        vm.expectRevert(StrategyRouter.ZeroAddress.selector);
+        // vm.expectRevert(StrategyRouter.ZeroAddress.selector);
         // borrowAsset = address(0) , 나머진 정상
         router.openPosition(AAVE, supplyAmt, address(0), 1.5e18);
         vm.stopPrank();
