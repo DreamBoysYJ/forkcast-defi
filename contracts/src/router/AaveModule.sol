@@ -40,6 +40,7 @@ abstract contract AaveModule {
     error TransferFailed();
     error BorrowingDisabled();
     error BorrowCapExceeded();
+    error BorrowAmountZero();
     error InsufficientLiquidity();
     error ZeroBorrowAfterSafety();
     error OraclePriceZero();

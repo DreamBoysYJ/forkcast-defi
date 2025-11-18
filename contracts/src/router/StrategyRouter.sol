@@ -66,7 +66,7 @@ contract StrategyRouter is AaveModule, UniswapV4Module {
         );
 
         if (borrowedAmount == 0) {
-            return;
+            revert BorrowAmountZero();
         }
 
         // 2) Uniswap v4: Router가 들고 있는 borrowedAmount를 사용해서

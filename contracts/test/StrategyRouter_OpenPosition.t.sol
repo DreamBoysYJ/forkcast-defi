@@ -11,6 +11,8 @@ import {IERC20, IERC20Metadata} from "../src/interfaces/IERC20.sol";
 import {UserAccount} from "../src/accounts/UserAccount.sol";
 import {AccountFactory} from "../src/factory/AccountFactory.sol";
 import {StrategyRouter} from "../src/router/StrategyRouter.sol";
+import {AaveModule} from "../src/router/AaveModule.sol";
+
 import {Miniv4SwapRouter} from "../src/uniswapV4/Miniv4SwapRouter.sol";
 
 // AAVE-V3
@@ -54,6 +56,20 @@ contract StrategyRouterOpenPosition is Test {
 
     // Actors
     address internal admin;
+
+    event PositionOpened(
+        address indexed user,
+        address indexed vault,
+        address supplyAsset,
+        uint256 supplyAmount,
+        address borrowAsset,
+        uint256 borrowedAmount,
+        uint256 tokenId,
+        uint256 amount0ForLp,
+        uint256 amount1ForLp,
+        uint256 spent0,
+        uint256 spent1
+    );
 
     function setUp() public {
         // 1) Fork Sepolia
@@ -253,6 +269,9 @@ contract StrategyRouterOpenPosition is Test {
         console2.log("HI");
     }
 
+    /// -------< Succeess Cases >--------------
+
+    /// @dev openPosition 최초 호출 성공
     function test_OpenPosition_HappyPath() public {
         // -------- 1) 유저 세팅 --------
         address user = makeAddr("user");
@@ -275,12 +294,26 @@ contract StrategyRouterOpenPosition is Test {
         // -------- 2) 유저가 openPosition 호출 --------
         vm.startPrank(user);
         supplyToken.approve(address(strategyRouter), supplyAmount);
+        vm.expectEmit(true, false, false, false, address(strategyRouter));
+        emit PositionOpened(
+            user,
+            address(0), // vault는 실제론 다르지만, 어차피 안 볼 거라 대충 0
+            address(0),
+            0,
+            address(0),
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+        );
 
         strategyRouter.openPosition(
             address(supplyToken), // supplyAsset
             supplyAmount, // supplyAmount
             address(borrowToken), // borrowAsset
-            0 // targetHF1e18: 0이면 라우터 기본값(예: 1.35e18) 사용
+            2.1e18 // 0이면 라우터 기본값(예: 1.35e18) 사용
         );
         vm.stopPrank();
 
@@ -333,6 +366,402 @@ contract StrategyRouterOpenPosition is Test {
         );
         console2.log("LIQUIDITY IN POOL AFTER USER IN :", afterLiquidity);
     }
+
+    /// @dev openPosition 후 다시 openPosition 호출
+    ///      1개 금고가 여러 포지션 LP를 소유할 수 있는지 체크
+    function test_OpenPosition_ReuseExistingVault_Succeeds() public {
+        // 1) 최초 openPosition 성공
+
+        // -------- 1) 유저 세팅 --------
+        address user = makeAddr("user");
+        uint256 supplyAmount = 100e18; // 너무 크면 세폴리아 유동성 따라 줄여도 됨
+
+        // 유저에게 supply 토큰 지급
+        deal(address(supplyToken), user, supplyAmount);
+
+        // openPosition 호출 전에는 vault가 없어야 정상
+        address vaultBefore = factory.accountOf(user);
+        assertEq(
+            vaultBefore,
+            address(0),
+            "vault should not exist before openPosition"
+        );
+
+        // v4 포지션 토큰 아이디 before 스냅샷
+        uint256 nextIdBefore = uniPositionManager.nextTokenId();
+
+        // -------- 2) 유저가 openPosition 호출 --------
+        vm.startPrank(user);
+        supplyToken.approve(address(strategyRouter), supplyAmount);
+
+        strategyRouter.openPosition(
+            address(supplyToken), // supplyAsset
+            supplyAmount, // supplyAmount
+            address(borrowToken), // borrowAsset
+            0 // targetHF1e18: 0이면 라우터 기본값(예: 1.35e18) 사용
+        );
+
+        // -------- 3) vault 생성 확인 --------
+        address vault = factory.accountOf(user);
+        assertTrue(
+            vault != address(0),
+            "vault should exist after openPosition"
+        );
+
+        // -------- 4) Aave 포지션(담보/부채) 검증 --------
+        IPool pool = IPool(aavePoolAddressProvider.getPool());
+
+        (
+            uint256 totalCollateralBase,
+            uint256 totalDebtBase,
+            ,
+            ,
+            ,
+            uint256 healthFactor
+        ) = pool.getUserAccountData(vault);
+
+        assertGt(totalCollateralBase, 0, "vault must have collateral on Aave");
+        assertGt(totalDebtBase, 0, "vault must have debt on Aave");
+        assertGt(healthFactor, 0, "HF must be > 0");
+
+        // -------- 5) Uniswap v4 LP 포지션 검증 --------
+        uint256 nextIdAfter = uniPositionManager.nextTokenId();
+        // 부트스트랩용 LP는 이미 setUp에서 하나 민트했으니,
+        // openPosition 이후에는 딱 1개 더 늘어나야 정상
+        assertEq(
+            nextIdAfter,
+            nextIdBefore + 1,
+            "exactly one new LP NFT should be minted"
+        );
+
+        uint256 newTokenId = nextIdAfter - 1;
+        // address owner = uniPositionManager.ownerOf(newTokenId);
+        // assertEq(owner, vault, "new LP NFT owner must be the vault");
+        // -------- 6) (선택) 디버그 로그 --------
+        console2.log("user vault        :", vault);
+        console2.log("collateral base   :", totalCollateralBase);
+        console2.log("debt base         :", totalDebtBase);
+        console2.log("health factor     :", healthFactor);
+        console2.log("new LP tokenId    :", newTokenId);
+
+        uint128 afterLiquidity = uniPositionManager.getPositionLiquidity(
+            newTokenId
+        );
+        console2.log("LIQUIDITY IN POOL AFTER USER IN :", afterLiquidity);
+
+        // 2. 유저가 다시 openPosition
+
+        // 1). 유저 세팅
+        uint256 supplyAmountRe = 500e18;
+        deal(address(supplyToken), user, supplyAmountRe);
+
+        // 이미 금고 존재해야
+        vaultBefore = factory.accountOf(user);
+        assertNotEq(vaultBefore, address(0));
+
+        // 포지션 토큰 스냅샷
+        uint256 nextTokenId = uniPositionManager.nextTokenId();
+
+        // 2) openPosition 호출
+        supplyToken.approve(address(strategyRouter), supplyAmountRe);
+
+        strategyRouter.openPosition(
+            address(supplyToken),
+            supplyAmountRe,
+            address(borrowToken),
+            1.5e18
+        );
+
+        // 3) 금고 그대로 여야
+        assertEq(
+            vaultBefore,
+            factory.accountOf(user),
+            "vault must be created once"
+        );
+
+        // 4) Aave 포지션 (담보/부채 검증)
+        IPool poolAfter = IPool(aavePoolAddressProvider.getPool());
+        (
+            uint256 totalCollateralBaseAfter,
+            uint256 totalDebtBaseAfter,
+            ,
+            ,
+            ,
+            uint256 healthFactorAfter
+        ) = pool.getUserAccountData(vaultBefore);
+
+        assertGt(
+            totalCollateralBaseAfter,
+            totalCollateralBase,
+            "total collabse must be increase"
+        );
+        assertGt(
+            totalDebtBaseAfter,
+            totalDebtBase,
+            "total collabse must be increase"
+        );
+        assertGt(healthFactorAfter, healthFactor, "HF must be increase");
+
+        // 5) Uniswap LP 포지션 검증
+        uint256 nextTokenIdAfter = uniPositionManager.nextTokenId();
+        assertEq(
+            nextTokenId + 1,
+            nextTokenIdAfter,
+            "Token must be not increased"
+        );
+
+        uint128 liquidityAfter = uniPositionManager.getPositionLiquidity(
+            nextTokenId
+        );
+        console2.log(
+            "LIQUIDITY IN POOL AFTER USER CALL TWICE :",
+            liquidityAfter
+        );
+    }
+
+    /// -------< Revert/Guard Cases >--------------
+
+    /// @dev supplyAsset == address(0)
+    function test_OpenPosition_Revert_ZeroSupplyAsset() public {
+        // -------- 1) 유저 세팅 --------
+        address user = makeAddr("user");
+        uint256 supplyAmount = 100e18; // 너무 크면 세폴리아 유동성 따라 줄여도 됨
+
+        // 유저에게 supply 토큰 지급
+        deal(address(supplyToken), user, supplyAmount);
+
+        // openPosition 호출 전에는 vault가 없어야 정상
+        address vaultBefore = factory.accountOf(user);
+        assertEq(
+            vaultBefore,
+            address(0),
+            "vault should not exist before openPosition"
+        );
+
+        // -------- 2) 유저가 openPosition 호출 --------
+        vm.startPrank(user);
+        supplyToken.approve(address(strategyRouter), supplyAmount);
+
+        vm.expectRevert(AaveModule.ZeroAddress.selector);
+
+        strategyRouter.openPosition(
+            address(0), // supplyAsset == address(0)
+            supplyAmount, // supplyAmount
+            address(borrowToken), // borrowAsset
+            0 // targetHF1e18: 0이면 라우터 기본값(예: 1.35e18) 사용
+        );
+        vm.stopPrank();
+    }
+
+    /// @dev borrowAsset == address(0)
+    function test_OpenPosition_Revert_ZeroBorrowAsset() public {
+        // -------- 1) 유저 세팅 --------
+        address user = makeAddr("user");
+        uint256 supplyAmount = 100e18; // 너무 크면 세폴리아 유동성 따라 줄여도 됨
+
+        // 유저에게 supply 토큰 지급
+        deal(address(supplyToken), user, supplyAmount);
+
+        // openPosition 호출 전에는 vault가 없어야 정상
+        address vaultBefore = factory.accountOf(user);
+        assertEq(
+            vaultBefore,
+            address(0),
+            "vault should not exist before openPosition"
+        );
+
+        // -------- 2) 유저가 openPosition 호출 --------
+        vm.startPrank(user);
+        supplyToken.approve(address(strategyRouter), supplyAmount);
+
+        vm.expectRevert(AaveModule.ZeroAddress.selector);
+
+        strategyRouter.openPosition(
+            address(supplyToken), // supplyAsset == address(0)
+            supplyAmount, // supplyAmount
+            address(0), // borrowAsset
+            0 // targetHF1e18: 0이면 라우터 기본값(예: 1.35e18) 사용
+        );
+        vm.stopPrank();
+    }
+
+    /// @dev supplyAsset is Not Approved beforehand
+    function test_OpenPosition_Revert_SupplyAssetNotApproved() public {
+        // -------- 1) 유저 세팅 --------
+        address user = makeAddr("user");
+        uint256 supplyAmount = 100e18; // 너무 크면 세폴리아 유동성 따라 줄여도 됨
+
+        // 유저에게 supply 토큰 지급
+        deal(address(supplyToken), user, supplyAmount);
+
+        // openPosition 호출 전에는 vault가 없어야 정상
+        address vaultBefore = factory.accountOf(user);
+        assertEq(
+            vaultBefore,
+            address(0),
+            "vault should not exist before openPosition"
+        );
+
+        // -------- 2) 유저가 openPosition 호출 --------
+        vm.startPrank(user);
+        // supplyToken.approve(address(strategyRouter), supplyAmount);
+
+        vm.expectRevert();
+
+        strategyRouter.openPosition(
+            address(supplyToken), // supplyAsset == address(0)
+            supplyAmount, // supplyAmount
+            address(borrowToken), // supplyAsset == address(0)
+            0 // targetHF1e18: 0이면 라우터 기본값(예: 1.35e18) 사용
+        );
+        vm.stopPrank();
+    }
+
+    /// @dev borrowingEnabled == false
+    function test_OpenPosition_Revert_WhenBorringDisabledFlagOff() public {
+        // -------- 1) 유저 세팅 --------
+        address user = makeAddr("user");
+        uint256 supplyAmount = 100e18;
+
+        // 유저에게 supply 토큰 지급
+        deal(address(supplyToken), user, supplyAmount);
+
+        vm.startPrank(user);
+        supplyToken.approve(address(strategyRouter), supplyAmount);
+
+        // 2) Aave reserve Config MOCK
+        // IAaveProtocolDataProvider.getReserveConfigurationData(asset) 시그니처 기준:
+        // (uint256,uint256,uint256,uint256,uint256,
+        //  bool usageAsCollateral,
+        //  bool borrowingEnabled,
+        //  bool stableRateBorrowingEnabled,
+        //  bool isActive,
+        //  bool isFrozen)
+        vm.mockCall(
+            address(aaveProtocolDataProvider),
+            abi.encodeWithSelector(
+                IAaveProtocolDataProvider.getReserveConfigurationData.selector,
+                address(borrowToken)
+            ),
+            abi.encode(
+                uint256(18), // decimals
+                uint256(0), // ltv
+                uint256(0), // liqThreshold
+                uint256(0), // liqBonus
+                uint256(0), // reserveFactor
+                true, // usageAsCollateral
+                false, // borrowingEnabled = false  <<<<<
+                true, // stableRateBorrowingEnabled
+                true, // isActive
+                false // isFrozen
+            )
+        );
+
+        // 3) expectRevert. BorrowingDisabled
+        vm.expectRevert(AaveModule.BorrowingDisabled.selector);
+
+        strategyRouter.openPosition(
+            address(supplyToken),
+            supplyAmount,
+            address(borrowToken),
+            0 // targetHF1e18 (0 → 기본값)
+        );
+
+        vm.stopPrank();
+    }
+
+    /// @dev supplyingEnabled == false
+    function test_OpenPosition_Revert_WhenSupplyingDisabledFlagOff() public {
+        // -------- 1) 유저 세팅 --------
+        address user = makeAddr("user");
+        uint256 supplyAmount = 100e18;
+
+        // 유저에게 supply 토큰 지급
+        deal(address(supplyToken), user, supplyAmount);
+
+        vm.startPrank(user);
+        supplyToken.approve(address(strategyRouter), supplyAmount);
+
+        // 2) Aave reserve Config MOCK
+        // IAaveProtocolDataProvider.getReserveConfigurationData(asset) 시그니처 기준:
+        // (uint256,uint256,uint256,uint256,uint256,
+        //  bool usageAsCollateral,
+        //  bool supplyingEnabled,
+        //  bool stableRatesupplyingEnabled,
+        //  bool isActive,
+        //  bool isFrozen)
+        vm.mockCall(
+            address(aaveProtocolDataProvider),
+            abi.encodeWithSelector(
+                IAaveProtocolDataProvider.getReserveConfigurationData.selector,
+                address(supplyToken)
+            ),
+            abi.encode(
+                uint256(18),
+                uint256(0),
+                uint256(0),
+                uint256(0),
+                uint256(0),
+                false, // usageAsCollateralEnabled = false  <<< 여기!
+                true, // borrowingEnabled (supply에는 영향 X)
+                true, // stableRateBorrowingEnabled
+                true, // isActive
+                false // isFrozen
+            )
+        );
+
+        // 3) expectRevert. BorrowingDisabled
+        vm.expectRevert(AaveModule.SupplyingDisabled.selector);
+
+        strategyRouter.openPosition(
+            address(supplyToken),
+            supplyAmount,
+            address(borrowToken),
+            0 // targetHF1e18 (0 → 기본값)
+        );
+
+        vm.stopPrank();
+    }
+
+    /// @dev supplyAmount == 0
+    function test_OpenPosition_Revert_ZeroSupplyAmount() public {
+        // -------- 1) 유저 세팅 --------
+        address user = makeAddr("user");
+        uint256 supplyAmount = 100e18; // 너무 크면 세폴리아 유동성 따라 줄여도 됨
+
+        // 유저에게 supply 토큰 지급
+        deal(address(supplyToken), user, supplyAmount);
+
+        // openPosition 호출 전에는 vault가 없어야 정상
+        address vaultBefore = factory.accountOf(user);
+        assertEq(
+            vaultBefore,
+            address(0),
+            "vault should not exist before openPosition"
+        );
+
+        // -------- 2) 유저가 openPosition 호출 --------
+        vm.startPrank(user);
+        supplyToken.approve(address(strategyRouter), supplyAmount);
+
+        vm.expectRevert(AaveModule.ZeroAmount.selector);
+
+        strategyRouter.openPosition(
+            address(supplyToken), // supplyAsset == address(0)
+            0, // supplyAmount <<< 000000000
+            address(borrowToken), // borrowAsset
+            0 // targetHF1e18: 0이면 라우터 기본값(예: 1.35e18) 사용
+        );
+        vm.stopPrank();
+    }
+
+    /// @dev borrowAmount = 0 일 경우 revert
+    // NOTE: ZeroBorrowAfterSafety:
+    // extremely edge-case (HF/caps/liquidity rounding → finalToken == 0).
+    // For now we rely on internal math; integration test omitted.
+    // TODO: if needed, cover with unit test + mocked Aave/Oracle.
+
+    /// -------< Helper Functions >--------------
 
     /// @dev 페어에 대한 PoolKey 생성
     function _buildPoolKey(
