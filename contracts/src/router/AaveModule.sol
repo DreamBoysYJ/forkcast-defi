@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
+import "forge-std/console2.sol";
 
 import {IERC20} from "../interfaces/IERC20.sol";
 import {IPool} from "../interfaces/aave-v3/IPool.sol";
@@ -49,6 +50,7 @@ abstract contract AaveModule {
     error InvalidBps();
     error SameValue();
     error SupplyingDisabled();
+    error NotEnoughToRepay();
 
     event AdminChanged(address indexed previousAdmin, address indexed newAdmin);
     event SafeBorrowBpsUpdated(
@@ -440,5 +442,132 @@ abstract contract AaveModule {
         UserAccount(userAccount).pullToOperator(borrowAsset, Q.finalToken);
 
         borrowedAmount = Q.finalToken;
+    }
+
+    /// @dev 아베 borrow한 토큰 repay + 예치한 토큰 out
+    /// @param user         포지션 소유자 (msg.sender)
+    /// @param vault        UserAccount(금고) 주소
+    /// @param supplyAsset  Aave에 예치한 담보 자산
+    /// @param borrowAsset  Aave에서 빌린 자산 (Uniswap 풀의 token0 또는 token1)
+    /// @param borrowAmountOut Uni V4 LP close 후, "LP/스왑으로부터" 라우터가 받았다고 예상한 borrowAsset 양
+    function _closeAavePosition(
+        address user,
+        address vault,
+        address supplyAsset,
+        address borrowAsset,
+        uint256 borrowAmountOut // Uni V4 LP Close 후 라우터의 borrowAsset의 양 (from LP)
+    )
+        internal
+        returns (
+            uint256 actualRepaid,
+            uint256 collateralOut,
+            uint256 leftovevrBorrow
+        )
+    {
+        if (vault == address(0)) revert ZeroAddress();
+        if (supplyAsset == address(0)) revert ZeroAddress();
+        if (borrowAsset == address(0)) revert ZeroAddress();
+
+        // 0) 라우터가 현재 들고 있는 borrowAsset (LP + 이전 잔여 포함)
+        uint256 routerBal = IERC20(borrowAsset).balanceOf(address(this));
+        if (routerBal == 0 && borrowAmountOut == 0) {
+            // LP에서 아무것도 못 받았고, 라우터에 남은 borrowAsset도 하나도 없음
+            revert ZeroBorrowAfterSafety();
+        }
+
+        // -------- Repay Debt --------
+
+        // 1) 현재 정확한 빚 (variableDebt 기준)
+        uint256 debtToken = _getExactDebtToken(vault, borrowAsset);
+        console2.log("debtToken      :", debtToken);
+
+        if (debtToken == 0) {
+            // 이론상 여기에 올 일은 거의 없지만, 방어적 처리:
+            // 빚이 없으면 담보/남은 토큰만 유저에게 돌려주는 흐름으로 가도 됨.
+            // 여기서는 간단히, 담보/남은 borrowAsset만 유저에게 넘기는 쪽으로 처리.
+            uint256 collateralAmt = _getExactCollateralToken(
+                vault,
+                supplyAsset
+            );
+            if (collateralAmt > 0) {
+                collateralOut = UserAccount(vault).withdrawTo(
+                    supplyAsset,
+                    collateralAmt,
+                    user
+                );
+            }
+
+            leftovevrBorrow = IERC20(borrowAsset).balanceOf(address(this));
+            if (leftovevrBorrow > 0) {
+                IERC20(borrowAsset).transfer(user, leftovevrBorrow);
+            }
+            return (actualRepaid, collateralOut, leftovevrBorrow);
+        }
+
+        // 2) 라우터 잔고만으로 빚을 다 못 갚는 경우, user 지갑에서 부족분 끌어오기
+        //    -> user는 미리 borrowAsset.approve(router, maxExtraFromUser) 해둔 상태여야 함.
+        if (routerBal < debtToken) {
+            uint256 shortfall = debtToken - routerBal;
+            console2.log("shortfall from user:", shortfall);
+
+            // 여기서 transferFrom이 revert 나면, "추가로 넣어라"는 프론트 메시지대로
+            // 유저가 충분히 approve/잔고를 안 준비한 상태인 거라 자연스럽게 실패.
+            IERC20(borrowAsset).transferFrom(user, address(this), shortfall);
+
+            // 이제 라우터는 debtToken 이상을 보유하게 됨
+            routerBal += shortfall;
+        }
+
+        // 여기 도달 시점에서는 routerBal >= debtToken 이 보장
+        // (부족하면 위 transferFrom에서 revert 났을 것)
+        // 필요 이상으로 들어온 borrowAsset(유저가 많이 넣었거나, LP profit)은 나중에 유저에게 다시 보내줌
+
+        // 3) Router -> Vault로 빚만큼 보내고, Vault에서 repay
+        IERC20(borrowAsset).transfer(vault, debtToken);
+        UserAccount(vault).repay(borrowAsset, debtToken);
+        actualRepaid = debtToken;
+
+        // -------- Withdraw Collateral --------
+
+        // 4) Vault가 들고 있던 담보(예치 자산) 전부 user에게 출금
+        uint256 collateralAmt = _getExactCollateralToken(vault, supplyAsset);
+        if (collateralAmt > 0) {
+            collateralOut = UserAccount(vault).withdrawTo(
+                supplyAsset,
+                collateralAmt,
+                user
+            );
+        }
+
+        // -------- Collect Fees / Profit --------
+
+        // 5) repay 이후 라우터가 여전히 들고 있는 borrowAsset 잔고 = 수익/잔여분
+        leftovevrBorrow = IERC20(borrowAsset).balanceOf(address(this));
+        if (leftovevrBorrow > 0) {
+            IERC20(borrowAsset).transfer(user, leftovevrBorrow);
+        }
+    }
+
+    /// @dev borrowAsset의 현재 빚(원금 + 이자) 계산
+    function _getExactDebtToken(
+        address vault,
+        address borrowAsset
+    ) internal view returns (uint256) {
+        (, , address variableDebtTokenAddress) = DATA_PROVIDER
+            .getReserveTokensAddresses(borrowAsset);
+
+        return IERC20(variableDebtTokenAddress).balanceOf(vault);
+    }
+
+    /// @dev supplyAsset의 현재 예치(원금 + 이자) 계산
+    function _getExactCollateralToken(
+        address vault,
+        address supplyAsset
+    ) internal view returns (uint256) {
+        (address aToken, , ) = DATA_PROVIDER.getReserveTokensAddresses(
+            supplyAsset
+        );
+
+        return IERC20(aToken).balanceOf(vault);
     }
 }

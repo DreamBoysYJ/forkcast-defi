@@ -6,6 +6,9 @@ import "forge-std/console2.sol";
 
 // Commons
 import {IERC20, IERC20Metadata} from "../src/interfaces/IERC20.sol";
+import {
+    IERC721
+} from "v4-core/lib/openzeppelin-contracts/contracts/token/ERC721/IERC721.sol";
 
 // Forkcast-Defi contracts
 import {UserAccount} from "../src/accounts/UserAccount.sol";
@@ -434,9 +437,22 @@ contract StrategyRouterOpenPosition is Test {
             "exactly one new LP NFT should be minted"
         );
 
+        // 5-1) NFT 소유자는 vault 여야 한다
+
         uint256 newTokenId = nextIdAfter - 1;
         // address owner = uniPositionManager.ownerOf(newTokenId);
         // assertEq(owner, vault, "new LP NFT owner must be the vault");
+
+        // 5-2) vault가 strategyRouter를 v4 포지션 operator로 승인했는지 확인
+        bool approved = IERC721(address(uniPositionManager)).isApprovedForAll(
+            vault,
+            address(strategyRouter)
+        );
+        assertTrue(
+            approved,
+            "vault must approve router as operator for Uniswap v4 positions"
+        );
+
         // -------- 6) (선택) 디버그 로그 --------
         console2.log("user vault        :", vault);
         console2.log("collateral base   :", totalCollateralBase);

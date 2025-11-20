@@ -4,6 +4,10 @@ pragma solidity 0.8.28;
 import {IERC20} from "../interfaces/IERC20.sol";
 import {IPool} from "../interfaces/aave-v3/IPool.sol";
 import {
+    IERC721
+} from "v4-core/lib/openzeppelin-contracts/contracts/token/ERC721/IERC721.sol";
+
+import {
     IPoolAddressesProvider
 } from "../interfaces/aave-v3/IPoolAddressesProvider.sol";
 
@@ -106,5 +110,37 @@ contract UserAccount {
         )
     {
         return _pool().getUserAccountData(address(this));
+    }
+
+    function approveUniswapV4Operator(
+        address positionManager,
+        address _operator
+    ) external onlyOperatorOrOwner {
+        IERC721(positionManager).setApprovalForAll(_operator, true);
+    }
+
+    /// @dev aave-v3에서 특정 asset을 amount만큼 repay
+    function repay(address asset, uint256 amount) external onlyOperatorOrOwner {
+        if (asset == address(0)) revert ZeroAddress();
+        if (amount == 0) revert ZeroAmount();
+
+        // Aave approve
+        if (!IERC20(asset).approve(address(_pool()), 0)) revert ApproveFailed();
+        if (!IERC20(asset).approve(address(_pool()), amount))
+            revert ApproveFailed();
+
+        _pool().repay(asset, amount, 2, address(this));
+    }
+
+    /// @dev Aave 예치 asset 전부 to로 출금
+    function withdrawTo(
+        address asset,
+        uint256 amount,
+        address to
+    ) external onlyOperatorOrOwner returns (uint256 amountOut) {
+        if (asset == address(0) || to == address(0)) revert ZeroAddress();
+        if (amount == 0) revert ZeroAmount();
+
+        amountOut = _pool().withdraw(asset, amount, to);
     }
 }
