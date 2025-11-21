@@ -8,16 +8,15 @@ import {UniswapV4Module} from "./UniswapV4Module.sol";
 import {UserAccount} from "../accounts/UserAccount.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {IPermit2} from "v4-periphery/lib/permit2/src/interfaces/IPermit2.sol";
+import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
+
 import {Currency} from "v4-core/src/types/Currency.sol";
+import {StateLibrary} from "v4-core/src/libraries/StateLibrary.sol";
+import {Slot0} from "v4-core/src/types/Slot0.sol";
 
 import {IERC20, IERC20Metadata} from "../interfaces/IERC20.sol";
 
 import {UniswapV4LiquidityPreview} from "../libs/UniswapV4LiquidityPreview.sol";
-
-import {
-    PositionInfo as V4PositionInfo,
-    PositionInfoLibrary
-} from "v4-periphery/src/libraries/PositionInfoLibrary.sol";
 
 contract StrategyRouter is AaveModule, UniswapV4Module {
     struct PositionInfo {
@@ -82,6 +81,49 @@ contract StrategyRouter is AaveModule, UniswapV4Module {
         UniswapV4Module(_swapRouter, _positionManager)
     {
         permit2 = IPermit2(_permit2);
+    }
+
+    /// @notice 주어진 tokenId에 대해
+    ///         - token0, token1
+    ///         - 현재 유동성(liquidity)
+    ///         - 지금 전부 제거하면 받을 token0 / token1 양
+    ///         - 포지션 범위(tickLower / tickUpper)
+    ///         - 현재 틱 / 현재 가격(sqrtPriceX96)
+    ///      를 한 번에 조회하는 view 함수 (프론트/렌즈용)
+    function previewUniPosition(
+        uint256 tokenId
+    )
+        external
+        view
+        returns (
+            address token0,
+            address token1,
+            uint128 liquidity,
+            uint256 amount0Now,
+            uint256 amount1Now,
+            int24 tickLower,
+            int24 tickUpper,
+            int24 currentTick,
+            uint160 sqrtPriceX96
+        )
+    {
+        (
+            ,
+            /*PoolKey key*/ token0,
+            token1,
+            amount0Now,
+            amount1Now
+        ) = _previewLpWithdrawAmounts(tokenId);
+
+        liquidity = positionManager.getPositionLiquidity(tokenId);
+
+        (tickLower, tickUpper) = _getDefaultTickRange();
+
+        IPoolManager manager = swapRouter.poolManager();
+        (sqrtPriceX96, currentTick, , ) = StateLibrary.getSlot0(
+            manager,
+            _uniPoolId
+        );
     }
 
     /// @dev 이미 sepolia에서 init 된 v4 Pool 정보를 admin이 한 번 더 세팅
@@ -227,7 +269,7 @@ contract StrategyRouter is AaveModule, UniswapV4Module {
         );
     }
 
-    /// @dev
+    /// @dev LP 전량 제거시 토큰을 얼마 받는지 계산
     function previewLpWithdrawAmounts(
         uint256 tokenId
     )
@@ -371,6 +413,7 @@ contract StrategyRouter is AaveModule, UniswapV4Module {
         maxExtraFromUser = totalDebtToken;
     }
 
+    /// @notice 수수료 획득
     function collectFees(
         uint256 tokenId
     ) external returns (uint256 collected0, uint256 collected1) {

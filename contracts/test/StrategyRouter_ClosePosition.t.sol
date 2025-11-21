@@ -41,9 +41,9 @@ import {Actions} from "v4-periphery/src/libraries/Actions.sol";
 import {TickMath} from "v4-core/src/libraries/TickMath.sol";
 
 // Hook
-import {SwapPriceLoggerHook} from "../../src/hook/SwapPriceLoggerHook.sol";
-import {HookMiner} from "../../src/libs/HookMiner.sol"; // 네 경로에 맞게
-import {Hooks} from "../../src/libs/Hooks.sol"; // 네가 복붙한 경로에 맞게
+import {SwapPriceLoggerHook} from "../src/hook/SwapPriceLoggerHook.sol";
+import {HookMiner} from "../src/libs/HookMiner.sol"; // 네 경로에 맞게
+import {Hooks} from "../src/libs/Hooks.sol"; // 네가 복붙한 경로에 맞게
 
 contract StrategyRouterClosePosition is Test {
     StrategyRouter public strategyRouter;

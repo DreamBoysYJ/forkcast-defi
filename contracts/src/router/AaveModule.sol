@@ -480,15 +480,12 @@ abstract contract AaveModule {
         // 1) 현재 정확한 빚 (variableDebt 기준)
         uint256 debtToken = _getExactDebtToken(vault, borrowAsset);
         console2.log("debtToken      :", debtToken);
-
+        uint256 collateralAmt;
         if (debtToken == 0) {
             // 이론상 여기에 올 일은 거의 없지만, 방어적 처리:
             // 빚이 없으면 담보/남은 토큰만 유저에게 돌려주는 흐름으로 가도 됨.
             // 여기서는 간단히, 담보/남은 borrowAsset만 유저에게 넘기는 쪽으로 처리.
-            uint256 collateralAmt = _getExactCollateralToken(
-                vault,
-                supplyAsset
-            );
+            collateralAmt = _getExactCollateralToken(vault, supplyAsset);
             if (collateralAmt > 0) {
                 collateralOut = UserAccount(vault).withdrawTo(
                     supplyAsset,
@@ -530,7 +527,7 @@ abstract contract AaveModule {
         // -------- Withdraw Collateral --------
 
         // 4) Vault가 들고 있던 담보(예치 자산) 전부 user에게 출금
-        uint256 collateralAmt = _getExactCollateralToken(vault, supplyAsset);
+        collateralAmt = _getExactCollateralToken(vault, supplyAsset);
         if (collateralAmt > 0) {
             collateralOut = UserAccount(vault).withdrawTo(
                 supplyAsset,
