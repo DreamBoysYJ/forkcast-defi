@@ -40,6 +40,11 @@ import {IPermit2} from "v4-periphery/lib/permit2/src/interfaces/IPermit2.sol";
 import {Actions} from "v4-periphery/src/libraries/Actions.sol";
 import {TickMath} from "v4-core/src/libraries/TickMath.sol";
 
+// Hook
+import {SwapPriceLoggerHook} from "../../src/hook/SwapPriceLoggerHook.sol";
+import {HookMiner} from "../../src/libs/HookMiner.sol"; // 네 경로에 맞게
+import {Hooks} from "../../src/libs/Hooks.sol"; // 네가 복붙한 경로에 맞게
+
 contract StrategyRouterClosePosition is Test {
     StrategyRouter public strategyRouter;
     AccountFactory public factory;
@@ -60,8 +65,18 @@ contract StrategyRouterClosePosition is Test {
     address public poolToken0;
     address public poolToken1;
 
+    // Hook
+    SwapPriceLoggerHook public hook;
+
     // Actors
     address internal admin;
+
+    event SwapPriceLogged(
+        PoolId indexed poolId,
+        int24 tick,
+        uint160 sqrtPriceX96,
+        uint256 timestamp
+    );
 
     event PositionClosed(
         address indexed user,
@@ -136,6 +151,12 @@ contract StrategyRouterClosePosition is Test {
         assertGt(address(permit2).code.length, 0, "permit2 not contract");
         assertGt(address(miniRouter).code.length, 0, "miniRouter not deployed");
 
+        // 훅 + 풀키
+        // 5) 훅 + 풀키 세팅
+        (SwapPriceLoggerHook _hook, PoolKey memory key) = _deployHook();
+        hook = _hook;
+        poolKey = key;
+
         // 3) admin EOA + startPrank
         admin = makeAddr("admin");
         vm.startPrank(admin);
@@ -173,19 +194,19 @@ contract StrategyRouterClosePosition is Test {
 
         // 6) Create PoolKey -> Pool Init (fee = 3000 / tickSpacing = 60 / hooks X / 초기 가격 1:1)
 
-        uint24 _fee = 3000;
-        int24 _tickSpacing = 10;
-        IHooks hooks = IHooks(address(0));
+        // uint24 _fee = 3000;
+        // int24 _tickSpacing = 10;
+        // IHooks hooks = IHooks(address(0));
 
-        PoolKey memory key = _buildPoolKey(
-            address(supplyToken),
-            address(borrowToken),
-            _fee,
-            _tickSpacing,
-            hooks
-        );
+        // PoolKey memory key = _buildPoolKey(
+        //     address(supplyToken),
+        //     address(borrowToken),
+        //     _fee,
+        //     _tickSpacing,
+        //     hooks
+        // );
 
-        poolKey = key;
+        // poolKey = key;
 
         uint160 sqrtPriceX96 = uint160(1) << 96;
 
@@ -375,6 +396,11 @@ contract StrategyRouterClosePosition is Test {
 
         // 4) User closePosition
         vm.startPrank(user);
+
+        PoolId poolId = poolKey.toId();
+        vm.expectEmit(true, true, false, false, address(hook));
+        emit SwapPriceLogged(poolId, 0, 0, 0);
+
         vm.expectEmit(true, true, true, false, address(strategyRouter));
         emit PositionClosed(
             user,
@@ -976,6 +1002,46 @@ contract StrategyRouterClosePosition is Test {
 
     /// -------< Helper Functions >--------------
 
+    /// @dev HookMiner를 사용해서 Hook 주소와 salt를 찾고, CREATE2로 배포 + PoolKey까지 생성
+    function _deployHook()
+        internal
+        returns (SwapPriceLoggerHook _hook, PoolKey memory key)
+    {
+        // 1) 훅 생성 코드 + 생성자 인자 준비
+        bytes memory creationCode = type(SwapPriceLoggerHook).creationCode;
+        bytes memory constructorArgs = abi.encode(address(uniPoolManager));
+
+        // 2) 원하는 플래그로 Hook 주소 / Salt 찾기
+        (address expectedHookAddr, bytes32 salt) = HookMiner.find({
+            deployer: address(this),
+            flags: uint160(Hooks.AFTER_SWAP_FLAG),
+            creationCode: creationCode,
+            constructorArgs: constructorArgs
+        });
+
+        // 3) CREATE2로 훅 배포
+        _hook = new SwapPriceLoggerHook{salt: salt}(address(uniPoolManager));
+
+        console2.log("EXPECTED HOOK :::", expectedHookAddr);
+        console2.log("HOOK DEPLOYED :::", address(_hook));
+
+        // 4) 테스트 환경 : deployer == address(this)
+
+        assertEq(address(_hook), expectedHookAddr, "hook address mismatch");
+
+        // 5) 이 훅 주소를 PoolKey에 세팅
+        uint24 fee = 3000;
+        int24 tickSpacing = 10;
+
+        key = _buildPoolKey(
+            address(supplyToken),
+            address(borrowToken),
+            fee,
+            tickSpacing,
+            IHooks(address(_hook))
+        );
+    }
+
     /// @dev user 수수료 수취 목적임의의 유저가 Swap N회 실행
     function _generateFeesByExternalSwaps(
         address trader,
@@ -993,6 +1059,13 @@ contract StrategyRouterClosePosition is Test {
 
             address inToken = zeroForOne ? poolToken0 : poolToken1;
             IERC20(inToken).approve(address(miniRouter), amountPerSwap);
+
+            // poolId, 이벤트 시그니처만 체크 (tick/price/timestamp는 안 봄)
+            // poolId, 시그니처만 체크하고 싶으면:
+
+            PoolId poolId = poolKey.toId();
+            vm.expectEmit(true, true, false, false, address(hook));
+            emit SwapPriceLogged(poolId, 0, 0, 0);
 
             Miniv4SwapRouter.ExactInputSingleParams
                 memory params = Miniv4SwapRouter.ExactInputSingleParams({
