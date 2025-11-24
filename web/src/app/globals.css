@@ -1,26 +1,59 @@
+/* ===== Forkcast: asset row 공통 스타일 ===== */
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+
+/* ===== Forkcast 공통 테이블 스타일 ===== */
+
+/* 한 줄(row) 기본 스타일 */
+.fc-row {
+  @apply border-b border-slate-100 last:border-b-0;
+}
+
+.fc-cell {
+  /* 가로는 그대로, 세로만 줄이기 */
+  @apply px-4 py-2 align-middle text-[13px] text-slate-900;
+}
+
+.fc-cell-left {
+  @apply text-left;
+}
+
+.fc-cell-right {
+  @apply text-right;
+}
+
+.fc-asset-main {
+  @apply flex items-center gap-2;
+}
+
+.fc-asset-icon {
+  @apply h-6 w-6 rounded-full;
+}
+
+.fc-asset-symbol {
+  @apply text-[13px] font-medium text-slate-900;
+}
+/* 작은 회색 텍스트 */
+.fc-muted {
+  font-size: 11px;
+  color: #9ca3af;
+}
+
+/* 피ILL 버튼(Preview strategy) 스타일 */
+.fc-btn-pill {
+  font-size: 11px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid #cbd5f5;
+  background-color: #eef2ff;
+  color: #1f2937;
+  cursor: pointer;
+}
+
+.fc-btn-pill:hover {
+  background-color: #e0e7ff;
 }
