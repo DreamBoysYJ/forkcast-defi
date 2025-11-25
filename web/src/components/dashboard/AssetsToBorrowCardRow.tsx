@@ -1,6 +1,12 @@
 "use client";
 
-import type { BorrowAsset } from "./AssetsToBorrowCard";
+export type BorrowAsset = {
+  symbol: string;
+  iconUrl?: string;
+  available: number;
+  availableUsd: number;
+  borrowApy: number;
+};
 
 type Props = {
   asset: BorrowAsset;
@@ -26,7 +32,7 @@ export function AssetsToBorrowCardRow({ asset }: Props) {
       {/* 2) Available (토큰 양 + USD) */}
       <td className="fc-cell fc-cell-right">
         <div className="font-medium text-slate-900 leading-tight">
-          {available.toFixed(4)}
+          {available.toFixed(2)}
         </div>
         <div className="fc-muted leading-tight">${availableUsd.toFixed(2)}</div>
       </td>

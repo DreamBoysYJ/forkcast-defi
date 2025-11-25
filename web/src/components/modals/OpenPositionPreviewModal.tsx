@@ -1,6 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
+// [CHANGED] useWriteContract 추가
+import {
+  useAccount,
+  usePublicClient,
+  useReadContract,
+  useWriteContract,
+} from "wagmi";
+import { erc20Abi } from "viem";
+import { strategyRouterContract, strategyLensContract } from "@/lib/contracts";
 
 export type AssetOption = {
   symbol: string;
@@ -10,112 +19,250 @@ export type AssetOption = {
 type OpenPositionPreviewModalProps = {
   isOpen: boolean;
   onClose: () => void;
-
-  // 셀렉트 박스에 들어갈 옵션들
   supplyOptions: AssetOption[];
   borrowOptions: AssetOption[];
-
-  // 카드에서 넘겨주는 초기 선택값 (예: "AAVE")
   initialSupplySymbol?: string;
 };
 
 type Phase = "approve" | "open";
+
+const HF_1E18 = 10n ** 18n;
 
 export function OpenPositionPreviewModal(props: OpenPositionPreviewModalProps) {
   const { isOpen, onClose, supplyOptions, borrowOptions, initialSupplySymbol } =
     props;
 
   if (!isOpen) return null;
-  if (supplyOptions.length === 0 || borrowOptions.length === 0) {
-    // 옵션 없으면 그냥 빈 모달로
-    return null;
-  }
+  if (supplyOptions.length === 0 || borrowOptions.length === 0) return null;
 
-  // -------- 기본 선택 값 --------
-  const initialSupply: AssetOption = (supplyOptions.find(
+  // ---- 1) Supply: AAVE만, Borrow: LINK만 사용하도록 필터 ----
+  const supplyList =
+    supplyOptions.filter((s) => s.symbol === "AAVE").length > 0
+      ? supplyOptions.filter((s) => s.symbol === "AAVE")
+      : supplyOptions;
+
+  const borrowList =
+    borrowOptions.filter((b) => b.symbol === "LINK").length > 0
+      ? borrowOptions.filter((b) => b.symbol === "LINK")
+      : borrowOptions;
+
+  const initialSupply: AssetOption = (supplyList.find(
     (a) => a.symbol === initialSupplySymbol
-  ) ?? supplyOptions[0]) as AssetOption;
+  ) ?? supplyList[0]) as AssetOption;
 
-  // -------- state --------
+  // ---- 2) 상태값 ----
   const [supplyAsset, setSupplyAsset] = useState<AssetOption>(initialSupply);
-  const [borrowAsset, setBorrowAsset] = useState<AssetOption>(borrowOptions[0]);
-  const [supplyAmount, setSupplyAmount] = useState<string>("100");
-  const [targetHF, setTargetHF] = useState<string>("1.40");
+  const [borrowAsset, setBorrowAsset] = useState<AssetOption>(borrowList[0]);
 
+  const [supplyAmount, setSupplyAmount] = useState<string>("0"); // UI 입력 (토큰 단위)
+  const [targetHF, setTargetHF] = useState<string>("1.35"); // 기본 1.35
+
+  // preview 결과
   const [projectedHF, setProjectedHF] = useState<number | null>(null);
-  const [ltvAfter, setLtvAfter] = useState<number | null>(null);
-  const [finalBorrowUsd, setFinalBorrowUsd] = useState<number | null>(null);
-  const [borrowUsedAfter, setBorrowUsedAfter] = useState<number | null>(null);
+  const [ltvBefore, setLtvBefore] = useState<number | null>(null); // %
+  const [ltvAfter, setLtvAfter] = useState<number | null>(null); // %
+  const [finalBorrowToken, setFinalBorrowToken] = useState<number | null>(null); // 예: 240.74 LINK
+  const [finalBorrowUsd, setFinalBorrowUsd] = useState<number | null>(null); // 예: 1234.56 $
 
   const [phase, setPhase] = useState<Phase>("approve");
   const [isRunningPreview, setIsRunningPreview] = useState(false);
   const [isRunningTx, setIsRunningTx] = useState(false);
 
+  const { address } = useAccount();
+  const publicClient = usePublicClient();
+  // [NEW] writeContractAsync: 실제 트랜잭션 보낼 때 사용
+  const { writeContractAsync } = useWriteContract();
+
+  // ---- 3) AAVE(공급 자산) 잔고/decimals ----
+  const { data: aaveDecimals } = useReadContract({
+    abi: erc20Abi,
+    address: supplyAsset.address,
+    functionName: "decimals",
+    query: { enabled: !!supplyAsset.address },
+  });
+
+  const { data: aaveBalance } = useReadContract({
+    abi: erc20Abi,
+    address: supplyAsset.address,
+    functionName: "balanceOf",
+    args: address ? [address] : undefined,
+    query: { enabled: !!address && !!supplyAsset.address },
+  });
+
+  // Borrow 자산(LINK) decimals (preview 결과를 토큰 단위로 바꾸는 용도)
+  const { data: borrowDecimals } = useReadContract({
+    abi: erc20Abi,
+    address: borrowAsset.address,
+    functionName: "decimals",
+    query: { enabled: !!borrowAsset.address },
+  });
+
   // initialSupplySymbol 바뀔 때마다 select 동기화
   useEffect(() => {
     if (!initialSupplySymbol) return;
-    const found = supplyOptions.find((a) => a.symbol === initialSupplySymbol);
-    if (found) {
-      setSupplyAsset(found);
-    }
-  }, [initialSupplySymbol, supplyOptions]);
+    const found = supplyList.find((a) => a.symbol === initialSupplySymbol);
+    if (found) setSupplyAsset(found);
+  }, [initialSupplySymbol, supplyList]);
+
+  // AAVE 잔고를 UI 기본값으로 사용 (소수 2자리)
+  useEffect(() => {
+    if (!aaveBalance || aaveDecimals === undefined) return;
+    const raw = aaveBalance as bigint;
+    const dec = Number(aaveDecimals);
+    const uiAmount = dec === 0 ? Number(raw) : Number(raw) / Math.pow(10, dec);
+
+    setSupplyAmount(uiAmount.toFixed(2));
+  }, [aaveBalance, aaveDecimals]);
 
   const hasPreview =
     projectedHF !== null &&
+    ltvBefore !== null &&
     ltvAfter !== null &&
-    finalBorrowUsd !== null &&
-    borrowUsedAfter !== null;
+    finalBorrowToken !== null;
 
-  // -------- previewBorrow 더미 호출 --------
+  // ---- 4) previewBorrow 호출 ----
   const handleRunPreview = async () => {
-    if (!supplyAmount || !targetHF) return;
+    if (!supplyAmount || !publicClient || !address) return;
 
     setIsRunningPreview(true);
 
     try {
-      // TODO: 여기서 실제 previewBorrow RPC/컨트랙트 호출 붙이면 됨
-      const amount = Number(supplyAmount) || 0;
-      const hf = Number(targetHF) || 0;
+      const amountNum = Number(supplyAmount) || 0;
+      if (amountNum <= 0) {
+        setIsRunningPreview(false);
+        return;
+      }
 
-      // 그냥 데모 계산
-      const demoProjectedHf = hf - 0.02;
-      const demoLtvAfter = 0.37;
-      const demoFinalBorrow = amount * 11.2; // 대충 1120 느낌
-      const demoBorrowUsed = 0.52;
+      // 여기서는 AAVE 18 decimals 가정 (decimals 를 써도 됨)
+      const supplyAmountBase = BigInt(Math.round(amountNum * 1e18));
 
-      setProjectedHF(demoProjectedHf);
-      setLtvAfter(demoLtvAfter);
-      setFinalBorrowUsd(demoFinalBorrow);
-      setBorrowUsedAfter(demoBorrowUsed);
+      // Target HF: 0 이면 0n 으로 보내서 라우터 디폴트(1.35) 사용
+      const targetHfNum = Number(targetHF);
+      const targetHF1e18 =
+        !targetHF || isNaN(targetHfNum) || targetHfNum <= 0
+          ? 0n
+          : BigInt(Math.round(targetHfNum * 1e18));
+
+      const result = (await publicClient.readContract({
+        ...strategyRouterContract,
+        functionName: "previewBorrow",
+        args: [
+          address,
+          supplyAsset.address,
+          supplyAmountBase,
+          borrowAsset.address,
+          targetHF1e18,
+        ],
+      })) as readonly bigint[];
+
+      const [
+        finalToken,
+        projectedHF1e18,
+        byHFToken,
+        policyMaxToken,
+        capRemainingToken,
+        liquidityToken,
+        collBeforeBase,
+        debtBeforeBase,
+        collAfterBase,
+        ltBeforeBps,
+        ltAfterBps,
+      ] = result;
+
+      const projectedHfFloat = Number(projectedHF1e18) / Number(HF_1E18);
+      const ltvBeforePct = Number(ltBeforeBps) / 100;
+      const ltvAfterPct = Number(ltAfterBps) / 100;
+
+      setProjectedHF(projectedHfFloat);
+      setLtvBefore(ltvBeforePct);
+      setLtvAfter(ltvAfterPct);
+
+      // Final borrow: 토큰 단위
+      let finalTokenUi: number;
+      if (borrowDecimals !== undefined) {
+        const dec = Number(borrowDecimals);
+        finalTokenUi =
+          dec === 0 ? Number(finalToken) : Number(finalToken) / 10 ** dec;
+      } else {
+        finalTokenUi = Number(finalToken) / 1e18;
+      }
+      setFinalBorrowToken(finalTokenUi);
+
+      // Final borrow: USD
+      try {
+        const [, baseUnit] = (await publicClient.readContract({
+          ...strategyLensContract,
+          functionName: "getOracleBaseCurrency",
+        })) as readonly [string, bigint];
+
+        const priceRaw = (await publicClient.readContract({
+          ...strategyLensContract,
+          functionName: "getAssetPrice",
+          args: [borrowAsset.address],
+        })) as bigint;
+
+        const priceRatio = Number(priceRaw) / Number(baseUnit);
+        const usdValue = finalTokenUi * priceRatio;
+
+        setFinalBorrowUsd(usdValue);
+      } catch (priceErr) {
+        console.error("Failed to fetch price for borrow asset", priceErr);
+        setFinalBorrowUsd(null);
+      }
+
       setPhase("approve");
+    } catch (err) {
+      console.error("previewBorrow failed", err);
     } finally {
       setIsRunningPreview(false);
     }
   };
 
-  // -------- primary 버튼: Approve -> Open 단계 --------
+  // ---- 5) Approve / Open 버튼 ----
   const handleClickPrimary = async () => {
     if (!hasPreview) return;
 
+    // [CHANGED] 여기서 실제 approve 트랜잭션 발생
     if (phase === "approve") {
+      if (!address) return;
       setIsRunningTx(true);
       try {
-        // TODO: 실제 approve 호출 자리
-        console.log(
-          "[TODO] approve",
-          supplyAsset.symbol,
-          "for router, amount:",
-          supplyAmount
-        );
-        // approve 끝났다고 가정
+        // [NEW] UI 입력값(supplyAmount)을 on-chain 단위로 변환
+        const amountNum = Number(supplyAmount) || 0;
+        if (amountNum <= 0) {
+          throw new Error("Supply amount must be > 0");
+        }
+
+        // AAVE decimals 기준으로 변환 (없으면 18 fallback)
+        const dec = aaveDecimals !== undefined ? Number(aaveDecimals) : 18;
+        const factor = 10 ** dec;
+        const amountBase = BigInt(Math.round(amountNum * factor));
+
+        // [NEW] AAVE ERC20 에 approve(router, amountBase) 호출
+        //  → 여기서 MetaMask 팝업 뜸
+        const txHash = await writeContractAsync({
+          abi: erc20Abi,
+          address: supplyAsset.address,
+          functionName: "approve",
+          args: [strategyRouterContract.address as `0x${string}`, amountBase],
+        });
+
+        console.log("approve tx hash", txHash);
+
+        // (원하면 여기서 waitForTransactionReceipt 도 가능)
+        // await publicClient?.waitForTransactionReceipt({ hash: txHash });
+
+        // Approve 성공했다고 보고 다음 단계로
         setPhase("open");
+      } catch (err) {
+        console.error("approve failed", err);
       } finally {
         setIsRunningTx(false);
       }
     } else {
+      // 실제 openPosition 호출은 나중에 구현
       setIsRunningTx(true);
       try {
-        // TODO: 실제 openPosition 호출 자리
         console.log(
           "[TODO] openPosition with",
           supplyAsset.symbol,
@@ -135,7 +282,9 @@ export function OpenPositionPreviewModal(props: OpenPositionPreviewModalProps) {
   const primaryLabel =
     phase === "approve" ? "Approve & continue" : "Confirm open position";
 
-  // -------- 렌더 --------
+  // ---- 6) 렌더 ----
+  const showPreview = hasPreview;
+
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/70">
       <div className="w-full max-w-3xl rounded-2xl bg-slate-900/95 p-6 shadow-xl border border-slate-800">
@@ -164,8 +313,8 @@ export function OpenPositionPreviewModal(props: OpenPositionPreviewModalProps) {
               Inputs
             </h3>
 
-            {/* Supply asset + amount */}
             <div className="rounded-xl bg-slate-900/80 p-4 border border-slate-800">
+              {/* Supply asset + amount */}
               <label className="block text-xs font-medium text-slate-400 mb-1">
                 Supply asset
               </label>
@@ -174,13 +323,13 @@ export function OpenPositionPreviewModal(props: OpenPositionPreviewModalProps) {
                   className="flex-1 rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-sm text-slate-50"
                   value={supplyAsset.symbol}
                   onChange={(e) => {
-                    const next = supplyOptions.find(
+                    const next = supplyList.find(
                       (a) => a.symbol === e.target.value
                     );
                     if (next) setSupplyAsset(next);
                   }}
                 >
-                  {supplyOptions.map((opt) => (
+                  {supplyList.map((opt) => (
                     <option key={opt.symbol} value={opt.symbol}>
                       {opt.symbol}
                     </option>
@@ -193,6 +342,7 @@ export function OpenPositionPreviewModal(props: OpenPositionPreviewModalProps) {
                 />
               </div>
 
+              {/* Borrow asset */}
               <div className="mt-4">
                 <label className="block text-xs font-medium text-slate-400 mb-1">
                   Borrow asset
@@ -201,13 +351,13 @@ export function OpenPositionPreviewModal(props: OpenPositionPreviewModalProps) {
                   className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-sm text-slate-50"
                   value={borrowAsset.symbol}
                   onChange={(e) => {
-                    const next = borrowOptions.find(
+                    const next = borrowList.find(
                       (a) => a.symbol === e.target.value
                     );
                     if (next) setBorrowAsset(next);
                   }}
                 >
-                  {borrowOptions.map((opt) => (
+                  {borrowList.map((opt) => (
                     <option key={opt.symbol} value={opt.symbol}>
                       {opt.symbol}
                     </option>
@@ -215,10 +365,16 @@ export function OpenPositionPreviewModal(props: OpenPositionPreviewModalProps) {
                 </select>
               </div>
 
+              {/* Target HF */}
               <div className="mt-4">
-                <label className="block text-xs font-medium text-slate-400 mb-1">
-                  Target HF
-                </label>
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-medium text-slate-400 mb-1">
+                    Target HF
+                  </label>
+                  <span className="text-[10px] text-slate-500">
+                    Default: 1.35 (0 → use default)
+                  </span>
+                </div>
                 <input
                   className="w-24 rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-right text-sm text-slate-50"
                   value={targetHF}
@@ -236,7 +392,7 @@ export function OpenPositionPreviewModal(props: OpenPositionPreviewModalProps) {
             </div>
           </div>
 
-          {/* -------- 오른쪽: simulation 결과 -------- */}
+          {/* -------- 오른쪽: Simulation 결과 -------- */}
           <div className="space-y-4">
             <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
               Simulation result (previewBorrow)
@@ -246,30 +402,34 @@ export function OpenPositionPreviewModal(props: OpenPositionPreviewModalProps) {
               <div>
                 <div className="text-xs text-slate-400">Projected HF</div>
                 <div className="text-lg font-semibold text-emerald-300">
-                  {hasPreview ? projectedHF?.toFixed(2) : "-"}
+                  {showPreview ? projectedHF!.toFixed(2) : "-"}
                 </div>
               </div>
 
               <div>
-                <div className="text-xs text-slate-400">LTV after</div>
+                <div className="text-xs text-slate-400">LTV before → after</div>
                 <div className="text-sm text-slate-100">
-                  {hasPreview ? `${(ltvAfter! * 100).toFixed(1)}%` : "-"}
+                  {showPreview
+                    ? `${ltvBefore!.toFixed(1)}% → ${ltvAfter!.toFixed(1)}%`
+                    : "-"}
                 </div>
               </div>
 
               <div className="pt-2 border-t border-slate-800">
-                <div className="text-xs text-slate-400">Final borrow (USD)</div>
+                <div className="text-xs text-slate-400">Final borrow</div>
                 <div className="text-sm text-slate-100">
-                  {hasPreview ? `$${finalBorrowUsd!.toFixed(2)}` : "-"}
+                  {showPreview
+                    ? `${finalBorrowToken!.toFixed(4)} ${borrowAsset.symbol}`
+                    : "-"}
                 </div>
-                <div className="mt-1 text-xs text-slate-400">
-                  Borrow used{" "}
-                  <span className="font-medium text-slate-100">
-                    {hasPreview
-                      ? `${(borrowUsedAfter! * 100).toFixed(1)}%`
-                      : "-"}
-                  </span>
-                </div>
+                {showPreview && finalBorrowUsd !== null && (
+                  <div className="mt-1 text-xs text-slate-400">
+                    ≈{" "}
+                    <span className="font-medium text-slate-100">
+                      ${finalBorrowUsd.toFixed(2)}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -280,7 +440,7 @@ export function OpenPositionPreviewModal(props: OpenPositionPreviewModalProps) {
           </div>
         </div>
 
-        {/* -------- footer 버튼 -------- */}
+        {/* 푸터 버튼 */}
         <div className="mt-6 flex items-center justify-end gap-3">
           <button
             onClick={onClose}

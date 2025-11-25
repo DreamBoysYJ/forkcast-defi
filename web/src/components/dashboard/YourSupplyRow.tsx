@@ -1,3 +1,4 @@
+// src/components/YourSupplyRow.tsx
 "use client";
 
 export type YourSupply = {
@@ -32,7 +33,7 @@ export function YourSupplyRow({ item }: Props) {
 
       {/* 2) Balance (토큰 수량 + USD) */}
       <td className="fc-cell fc-cell-right">
-        <div className="font-medium text-slate-900 leading-tight">
+        <div className="font-medium leading-tight text-slate-900">
           {supplied.toFixed(2)}
         </div>
         <div className="fc-muted leading-tight">${suppliedUsd.toFixed(2)}</div>

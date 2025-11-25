@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import "forge-std/console2.sol";
-
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "v4-core/src/types/PoolId.sol";
 import {Currency} from "v4-core/src/types/Currency.sol";
@@ -165,8 +163,6 @@ abstract contract UniswapV4Module {
             0,
             address(this)
         );
-        console2.log("LP END token0:::", received0);
-        console2.log("LP END token1:::", received1);
 
         // 4) borrowAsset 기준으로 정리
         (address token0, address token1) = _getPoolTokens();
@@ -190,9 +186,7 @@ abstract contract UniswapV4Module {
                     token1,
                     received1
                 );
-                console2.log("SWAPPED 1 -> 0, :::", swapped);
                 borrowAmountOut += swapped;
-                console2.log("TOTAL TOKEN AFTER SWAPPED :::", borrowAmountOut);
             }
         } else {
             borrowAmountOut = received1;
@@ -205,10 +199,8 @@ abstract contract UniswapV4Module {
                     token0,
                     received0
                 );
-                console2.log("SWAPPED 0 -> 1, :::", swapped);
 
                 borrowAmountOut += swapped;
-                console2.log("TOTAL TOKEN AFTER SWAPPED :::", borrowAmountOut);
             }
         }
     }
@@ -249,7 +241,6 @@ abstract contract UniswapV4Module {
 
         bool zeroForOne = (borrowAsset == token0);
         uint256 half = borrowedAmount / 2;
-        console2.log("Half of Borrow token :::", half);
 
         uint128 half128 = uint128(half);
         require(uint256(half128) == half, "Amount too big");
@@ -262,8 +253,6 @@ abstract contract UniswapV4Module {
             borrowAsset,
             half
         );
-
-        console2.log("Result of Swapped  :::", amountOut);
 
         if (zeroForOne) {
             // token0 -> token1
@@ -340,14 +329,9 @@ abstract contract UniswapV4Module {
         tokenId = beforeId;
         spent0 = bal0Before - bal0After;
         spent1 = bal1Before - bal1After;
-        console2.log("token0 Provided in Pool :::", spent0);
-        console2.log("token1 Provided in Pool :::", spent1);
 
         uint256 routerBal0 = IERC20(t0).balanceOf(address(this));
         uint256 routerBal1 = IERC20(t1).balanceOf(address(this));
-
-        console2.log("ROUTER HAS :::: token0", routerBal0);
-        console2.log("ROUTER HAS :::: token1", routerBal1);
     }
 
     /// @dev v4 PositionManager.modifyLiquidities로 유동성을 전체 해제

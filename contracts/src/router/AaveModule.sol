@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
-import "forge-std/console2.sol";
 
 import {IERC20} from "../interfaces/IERC20.sol";
 import {IPool} from "../interfaces/aave-v3/IPool.sol";
@@ -479,7 +478,7 @@ abstract contract AaveModule {
 
         // 1) 현재 정확한 빚 (variableDebt 기준)
         uint256 debtToken = _getExactDebtToken(vault, borrowAsset);
-        console2.log("debtToken      :", debtToken);
+
         uint256 collateralAmt;
         if (debtToken == 0) {
             // 이론상 여기에 올 일은 거의 없지만, 방어적 처리:
@@ -505,7 +504,6 @@ abstract contract AaveModule {
         //    -> user는 미리 borrowAsset.approve(router, maxExtraFromUser) 해둔 상태여야 함.
         if (routerBal < debtToken) {
             uint256 shortfall = debtToken - routerBal;
-            console2.log("shortfall from user:", shortfall);
 
             // 여기서 transferFrom이 revert 나면, "추가로 넣어라"는 프론트 메시지대로
             // 유저가 충분히 approve/잔고를 안 준비한 상태인 거라 자연스럽게 실패.

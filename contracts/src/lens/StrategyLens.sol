@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import "forge-std/console2.sol";
-
 // Common
 import {IERC20, IERC20Metadata} from "../interfaces/IERC20.sol";
 
@@ -508,12 +506,6 @@ contract StrategyLens {
             rates[i].liquidityRateRay = liquidityRate;
             rates[i].variableBorrowRateRay = variableBorrowRate;
             rates[i].stableBorrowRateRay = stableBorrowRate;
-
-            // console2.log("asset :::", asset);
-            // // console2.log("symbol :::", tokens[i].symbol);
-            // console2.log("liquidityRate :::", liquidityRate);
-            // console2.log("variableBorrowRate :::", variableBorrowRate);
-            // console2.log("stableBorrowRate :::", stableBorrowRate);
         }
     }
 

@@ -64,30 +64,17 @@ export default function Page() {
   >(undefined);
   const [isDemoTraderOpen, setIsDemoTraderOpen] = useState(false);
 
-  // TODO: 나중에 실제 세폴리아 주소로 교체
   const supplyOptions: AssetOption[] = [
     {
       symbol: "AAVE",
-      address: "0x0000000000000000000000000000000000000001",
-    },
-    {
-      symbol: "USDC",
-      address: "0x0000000000000000000000000000000000000002",
+      address: process.env.NEXT_PUBLIC_AAVE_UNDERLYING_SEPOLIA as `0x${string}`,
     },
   ];
 
   const borrowOptions: AssetOption[] = [
     {
-      symbol: "WBTC",
-      address: "0x0000000000000000000000000000000000000003",
-    },
-    {
-      symbol: "USDC",
-      address: "0x0000000000000000000000000000000000000002",
-    },
-    {
       symbol: "LINK",
-      address: "0x0000000000000000000000000000000000000004",
+      address: process.env.NEXT_PUBLIC_LINK_UNDERLYING_SEPOLIA as `0x${string}`,
     },
   ];
 

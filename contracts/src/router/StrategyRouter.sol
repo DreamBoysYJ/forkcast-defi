@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import "forge-std/console2.sol";
-
 import {AaveModule} from "./AaveModule.sol";
 import {UniswapV4Module} from "./UniswapV4Module.sol";
 import {UserAccount} from "../accounts/UserAccount.sol";
@@ -154,7 +152,6 @@ contract StrategyRouter is AaveModule, UniswapV4Module {
         if (borrowedAmount == 0) {
             revert BorrowAmountZero();
         }
-        console2.log("Borrowed amount :::", borrowedAmount);
         UserAccount(userAccount).approveUniswapV4Operator(
             address(positionManager),
             address(this)
@@ -174,18 +171,14 @@ contract StrategyRouter is AaveModule, UniswapV4Module {
         // 남은 토큰 (supplyAsset) : user 주소로 보내주기
         uint256 leftover0 = IERC20(supplyAsset).balanceOf(address(this));
         uint256 leftover1 = IERC20(borrowAsset).balanceOf(address(this));
-        console2.log("TOKEN 0 ROUTER HAS AFTER LP :", leftover0);
-        console2.log("TOKEN 1 ROUTER HAS AFTER LP :", leftover1);
 
         if (leftover0 > 0) {
             IERC20(supplyAsset).transfer(msg.sender, leftover0);
-            console2.log("LEFTOVER TOKEN 0 Back to user :", leftover0);
         }
         // 남은 토큰 (borrowAsset) : aave repay (빚 갚기)
         if (leftover1 > 0) {
             IERC20(borrowAsset).transfer(userAccount, leftover1);
             UserAccount(userAccount).repay(borrowAsset, leftover1);
-            console2.log("LEFTOVER TOKEN 1 Repay to userAccount :", leftover1);
         }
 
         // 3) 데이터 저장
@@ -198,8 +191,6 @@ contract StrategyRouter is AaveModule, UniswapV4Module {
             borrowAsset: borrowAsset,
             isOpen: true
         });
-
-        console2.log("FUCKKKK");
 
         emit PositionOpened(
             msg.sender,
@@ -235,7 +226,6 @@ contract StrategyRouter is AaveModule, UniswapV4Module {
             borrowAsset,
             tokenId
         );
-        console2.log("borrowAmountOut:", borrowAmountOut);
 
         // 2) Close Aave Position (Repay BorrowAsset + Withdraw Supply)
         //    - borrowAsset 빚 전액 상환 (vault 기준)
