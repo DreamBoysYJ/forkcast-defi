@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import "forge-std/console2.sol";
-
 import {Hooks} from "../libs/Hooks.sol";
 
 import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
