@@ -1,6 +1,62 @@
+// src/components/modals/ClosePositionPreviewModal.tsx
 "use client";
 
 import { useEffect, useState } from "react";
+import { useAccount, useConfig, useWriteContract } from "wagmi";
+import { readContract } from "@wagmi/core";
+import { parseUnits } from "viem";
+import { strategyRouterContract } from "@/lib/contracts";
+import { useRouter } from "next/navigation";
+
+// 데모용: 우리가 쓰는 토큰 메타 (AAVE / LINK)
+const TOKEN_META: Record<
+  string,
+  { symbol: string; icon: string; decimals: number }
+> = {
+  // AAVE
+  "0x88541670e55cc00beefd87eb59edd1b7c511ac9a": {
+    symbol: "AAVE",
+    icon: "/tokens/aave.png",
+    decimals: 18,
+  },
+  // LINK
+  "0xf8fb3713d459d7c1018bd0a49d19b4c44290ebe5": {
+    symbol: "LINK",
+    icon: "/tokens/link.png",
+    decimals: 18,
+  },
+};
+
+// 최소 ERC20 ABI (approve / balanceOf / allowance)
+const erc20Abi = [
+  {
+    type: "function",
+    name: "approve",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "spender", type: "address" },
+      { name: "amount", type: "uint256" },
+    ],
+    outputs: [{ name: "", type: "bool" }],
+  },
+  {
+    type: "function",
+    name: "balanceOf",
+    stateMutability: "view",
+    inputs: [{ name: "owner", type: "address" }],
+    outputs: [{ name: "balance", type: "uint256" }],
+  },
+  {
+    type: "function",
+    name: "allowance",
+    stateMutability: "view",
+    inputs: [
+      { name: "owner", type: "address" },
+      { name: "spender", type: "address" },
+    ],
+    outputs: [{ name: "amount", type: "uint256" }],
+  },
+] as const;
 
 export type ClosePreviewData = {
   tokenId: number;
@@ -10,6 +66,8 @@ export type ClosePreviewData = {
   supplyIconUrl: string;
   borrowIconUrl: string;
   vaultAddress: string;
+  borrowTokenAddress: `0x${string}`;
+  borrowDecimals: number;
 
   // LP에서 빠져나오는 토큰들
   token0Symbol: string;
@@ -29,48 +87,9 @@ export type ClosePreviewData = {
 type ClosePositionPreviewModalProps = {
   isOpen: boolean;
   onClose: () => void;
-
-  // 어떤 포지션을 닫을지
   tokenId: number;
+  totalDebtUsdFromCard: number; // ★ 추가
 };
-
-// ----------------------
-// 데모용 mock 로더
-// (나중에 여기만 previewClosePosition + price oracle + balance/allowance 호출로 교체하면 됨)
-// ----------------------
-async function mockLoadClosePreview(tokenId: number): Promise<{
-  preview: ClosePreviewData;
-  walletBorrowBalance: number;
-  allowanceForRouter: number;
-}> {
-  // 그냥 데모 값들
-  const preview: ClosePreviewData = {
-    tokenId,
-    supplySymbol: "AAVE",
-    borrowSymbol: "WBTC",
-    supplyIconUrl: "/tokens/aave.png",
-    borrowIconUrl: "/tokens/wbtc.png",
-    vaultAddress: "0xabcdef1234567890abcdef1234567890abcdef12",
-
-    token0Symbol: "AAVE",
-    token1Symbol: "WBTC",
-    amount0FromLp: 100,
-    amount1FromLp: 0.3,
-
-    totalDebtToken: 0.08,
-    totalDebtUsd: 1120,
-    lpBorrowTokenAmount: 0.03,
-    lpBorrowUsd: 420,
-    minExtraFromUser: 0.05,
-    maxExtraFromUser: 0.08,
-  };
-
-  // 유저 지갑에 있는 borrowAsset, allowance 값 (데모)
-  const walletBorrowBalance = 0.12;
-  const allowanceForRouter = 0.0;
-
-  return { preview, walletBorrowBalance, allowanceForRouter };
-}
 
 // 주소 줄여서 보여주기
 function shortenAddress(addr: string) {
@@ -79,11 +98,23 @@ function shortenAddress(addr: string) {
 }
 
 type Phase = "approve" | "close";
+type Mode = "simulate" | "done";
+
+// bigint → 토큰 수량(number)
+function toTokenAmount(raw: bigint, decimals: number): number {
+  if (raw === 0n) return 0;
+  return Number(raw) / 10 ** decimals;
+}
 
 export function ClosePositionPreviewModal(
   props: ClosePositionPreviewModalProps
 ) {
-  const { isOpen, onClose, tokenId } = props;
+  const { isOpen, onClose, tokenId, totalDebtUsdFromCard } = props;
+  const router = useRouter();
+
+  const { address: wallet } = useAccount();
+  const wagmiConfig = useConfig();
+  const { writeContractAsync } = useWriteContract();
 
   const [preview, setPreview] = useState<ClosePreviewData | null>(null);
   const [walletBorrowBalance, setWalletBorrowBalance] = useState<number>(0);
@@ -93,43 +124,179 @@ export function ClosePositionPreviewModal(
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
   const [isRunningTx, setIsRunningTx] = useState(false);
   const [phase, setPhase] = useState<Phase>("approve");
+  const [mode, setMode] = useState<Mode>("simulate");
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  // 모달 열릴 때마다 previewClosePosition + balance/allowance 로딩
+  // 모달 열릴 때마다 실제 previewClosePosition + balance/allowance 읽어오기
   useEffect(() => {
     if (!isOpen) return;
 
-    setIsLoadingPreview(true);
-    setPreview(null);
+    const load = async () => {
+      setIsLoadingPreview(true);
+      setLoadError(null);
+      setPreview(null);
+      setHasAllowance(false);
+      setPhase("approve");
+      setMode("simulate");
 
-    mockLoadClosePreview(tokenId)
-      .then(({ preview, walletBorrowBalance, allowanceForRouter }) => {
-        setPreview(preview);
-        setWalletBorrowBalance(walletBorrowBalance);
+      try {
+        const idBig = BigInt(tokenId);
 
-        // 기본 extraAmount는 minExtraFromUser
-        setExtraAmountInput(preview.minExtraFromUser.toString());
+        // 1) StrategyRouter.previewClosePosition(tokenId)
+        const result = (await readContract(wagmiConfig, {
+          ...strategyRouterContract,
+          functionName: "previewClosePosition",
+          args: [idBig],
+        })) as readonly [
+          `0x${string}`, // vault
+          `0x${string}`, // supplyAsset
+          `0x${string}`, // borrowAsset
+          bigint, // totalDebtToken
+          bigint, // lpBorrowTokenAmount
+          bigint, // minExtraFromUser
+          bigint, // maxExtraFromUser
+          bigint, // amount0FromLp
+          bigint // amount1FromLp
+        ];
 
-        // allowance 체크 (데모)
-        const extra = preview.minExtraFromUser;
-        setHasAllowance(allowanceForRouter >= extra);
+        const [
+          vault,
+          supplyAsset,
+          borrowAsset,
+          totalDebtTokenRaw,
+          lpBorrowTokenAmountRaw,
+          minExtraRaw,
+          maxExtraRaw,
+          amount0FromLpRaw,
+          amount1FromLpRaw,
+        ] = result;
 
-        // 빚이 없거나 추가 필요량이 0이면 바로 close 단계로
-        if (preview.minExtraFromUser <= 0) {
-          setPhase("close");
+        const supplyMeta =
+          TOKEN_META[supplyAsset.toLowerCase()] ??
+          ({
+            symbol: "SUPPLY",
+            icon: "/tokens/default.png",
+            decimals: 18,
+          } as const);
+        const borrowMeta =
+          TOKEN_META[borrowAsset.toLowerCase()] ??
+          ({
+            symbol: "BORROW",
+            icon: "/tokens/default.png",
+            decimals: 18,
+          } as const);
+
+        const totalDebtToken = toTokenAmount(
+          totalDebtTokenRaw,
+          borrowMeta.decimals
+        );
+        const lpBorrowTokenAmount = toTokenAmount(
+          lpBorrowTokenAmountRaw,
+          borrowMeta.decimals
+        );
+        const minExtraFromUser = toTokenAmount(
+          minExtraRaw,
+          borrowMeta.decimals
+        );
+        const maxExtraFromUser = toTokenAmount(
+          maxExtraRaw,
+          borrowMeta.decimals
+        );
+
+        const amount0FromLp = toTokenAmount(
+          amount0FromLpRaw,
+          supplyMeta.decimals
+        );
+        const amount1FromLp = toTokenAmount(
+          amount1FromLpRaw,
+          borrowMeta.decimals
+        );
+
+        // USD 는 일단 0으로 두고, 나중에 Aave price oracle 붙이면 됨.
+        // ❶ borrow 토큰 1개당 USD 가격 추정
+        const borrowPriceUsd =
+          totalDebtToken > 0 ? totalDebtUsdFromCard / totalDebtToken : 0;
+
+        // ❷ 그 가격으로 다시 USD 값 계산
+        const totalDebtUsd = totalDebtToken * borrowPriceUsd;
+        const lpBorrowUsd = lpBorrowTokenAmount * borrowPriceUsd;
+
+        const previewData: ClosePreviewData = {
+          tokenId,
+          supplySymbol: supplyMeta.symbol,
+          borrowSymbol: borrowMeta.symbol,
+          supplyIconUrl: supplyMeta.icon,
+          borrowIconUrl: borrowMeta.icon,
+          vaultAddress: vault,
+          borrowTokenAddress: borrowAsset,
+          borrowDecimals: borrowMeta.decimals,
+          token0Symbol: supplyMeta.symbol,
+          token1Symbol: borrowMeta.symbol,
+          amount0FromLp,
+          amount1FromLp,
+          totalDebtToken,
+          totalDebtUsd,
+          lpBorrowTokenAmount,
+          lpBorrowUsd,
+          minExtraFromUser,
+          maxExtraFromUser,
+        };
+
+        setPreview(previewData);
+
+        // extraAmount 기본값 = maxExtra (우리는 이 값을 approve)
+        setExtraAmountInput(maxExtraFromUser.toString());
+
+        // 2) wallet balance / allowance (있을 때만)
+        if (wallet) {
+          const [balanceRaw, allowanceRaw] = await Promise.all([
+            readContract(wagmiConfig, {
+              address: borrowAsset,
+              abi: erc20Abi,
+              functionName: "balanceOf",
+              args: [wallet],
+            }) as Promise<bigint>,
+            readContract(wagmiConfig, {
+              address: borrowAsset,
+              abi: erc20Abi,
+              functionName: "allowance",
+              args: [wallet, strategyRouterContract.address],
+            }) as Promise<bigint>,
+          ]);
+
+          const balance = toTokenAmount(balanceRaw, borrowMeta.decimals);
+          const allowance = toTokenAmount(allowanceRaw, borrowMeta.decimals);
+
+          setWalletBorrowBalance(balance);
+          setHasAllowance(allowance >= maxExtraFromUser);
+
+          if (maxExtraFromUser <= 0 || allowance >= maxExtraFromUser) {
+            setPhase("close");
+          } else {
+            setPhase("approve");
+          }
         } else {
+          // 지갑 안 연결된 상태면 balance/allowance 는 0 처리
+          setWalletBorrowBalance(0);
+          setHasAllowance(false);
           setPhase("approve");
         }
-      })
-      .finally(() => {
+      } catch (e: any) {
+        console.error("[ClosePreview] load failed", e);
+        setLoadError("Failed to load close preview. Check console / RPC.");
+      } finally {
         setIsLoadingPreview(false);
-      });
-  }, [isOpen, tokenId]);
+      }
+    };
+
+    load();
+  }, [isOpen, tokenId, wagmiConfig, wallet, totalDebtUsdFromCard]);
 
   if (!isOpen) return null;
 
   const extraAmount = Number(extraAmountInput) || 0;
 
-  const hasPreview = !!preview && !isLoadingPreview;
+  const hasPreview = !!preview && !isLoadingPreview && !loadError;
   const debtCoveredRatio =
     hasPreview && preview!.totalDebtToken > 0
       ? preview!.lpBorrowTokenAmount / preview!.totalDebtToken
@@ -139,38 +306,69 @@ export function ClosePositionPreviewModal(
 
   // primary 버튼 라벨
   let primaryLabel = "Loading…";
-  if (hasPreview) {
-    if (!hasAllowance && extraAmount > 0) {
-      primaryLabel = `Approve ${preview!.borrowSymbol}`;
+  if (hasPreview && preview) {
+    if (mode === "done") {
+      primaryLabel = "Done";
+    } else if (phase === "approve" && extraAmount > 0) {
+      primaryLabel = `Approve ${preview.borrowSymbol}`;
     } else {
       primaryLabel = "Confirm close position";
     }
   }
 
-  const isPrimaryDisabled =
+  let isPrimaryDisabled =
     !hasPreview ||
     isLoadingPreview ||
     isRunningTx ||
     insufficientBalance ||
     extraAmount < 0;
 
-  // Approve -> Close 플로우
+  if (mode === "done") {
+    // 완료 모드에서는 닫기만 할 수 있게
+    isPrimaryDisabled = isRunningTx;
+  }
+
+  // Approve -> closePosition 플로우
   const handleClickPrimary = async () => {
     if (!preview) return;
 
-    if (!hasAllowance && extraAmount > 0) {
-      // 1) Approve 단계
+    // 완료 모드에서는 그냥 모달 닫기
+    if (mode === "done") {
+      onClose();
+      return;
+    }
+
+    if (phase === "approve" && extraAmount > 0) {
+      // 1) Approve 단계: maxExtraFromUser 만큼 approve
       setIsRunningTx(true);
       try {
-        // TODO: 여기서 실제 ERC20 approve(router, extraAmount) 호출
-        console.log(
-          "[TODO] approve",
-          preview.borrowSymbol,
-          "for router, amount:",
-          extraAmount
+        const approveTokenAmount = preview.maxExtraFromUser;
+        const approveWei = parseUnits(
+          approveTokenAmount.toString(),
+          preview.borrowDecimals
         );
+
+        console.log(
+          "[ClosePreview] approve",
+          preview.borrowSymbol,
+          "spender=router:",
+          strategyRouterContract.address,
+          "amount:",
+          approveTokenAmount
+        );
+
+        const hash = await writeContractAsync({
+          address: preview.borrowTokenAddress,
+          abi: erc20Abi,
+          functionName: "approve",
+          args: [strategyRouterContract.address, approveWei],
+        });
+
+        console.log("[ClosePreview] approve tx hash:", hash);
         setHasAllowance(true);
         setPhase("close");
+      } catch (e) {
+        console.error("[ClosePreview] approve failed", e);
       } finally {
         setIsRunningTx(false);
       }
@@ -178,24 +376,26 @@ export function ClosePositionPreviewModal(
       // 2) closePosition 호출
       setIsRunningTx(true);
       try {
-        // TODO: 여기서 실제 closePosition(tokenId, extraAmount) 트랜잭션 호출
-        console.log(
-          "[TODO] closePosition tokenId:",
-          preview.tokenId,
-          "with extra",
-          extraAmount,
-          preview.borrowSymbol
-        );
+        const hash = await writeContractAsync({
+          ...strategyRouterContract,
+          functionName: "closePosition",
+          args: [BigInt(preview.tokenId)],
+          gas: 5_000_000n,
+        });
+
+        console.log("[ClosePreview] closePosition tx hash:", hash);
         onClose();
+        router.refresh();
+
+        // 실제 값은 이벤트/리시트에서 나중에 뽑고,
+        // 지금은 preview 데이터를 기반으로 "Estimated result" 표시
+        setMode("done");
+      } catch (e) {
+        console.error("[ClosePreview] closePosition failed", e);
       } finally {
         setIsRunningTx(false);
       }
     }
-  };
-
-  const handleUseMin = () => {
-    if (!preview) return;
-    setExtraAmountInput(preview.minExtraFromUser.toString());
   };
 
   const handleUseMax = () => {
@@ -220,15 +420,18 @@ export function ClosePositionPreviewModal(
           <button
             onClick={onClose}
             className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-300 hover:bg-slate-800"
+            disabled={isRunningTx}
           >
             Esc
           </button>
         </div>
 
-        {/* 로딩 상태 */}
+        {/* 로딩 / 에러 */}
         {!hasPreview && (
           <div className="py-16 text-center text-sm text-slate-400">
-            Loading preview…
+            {isLoadingPreview
+              ? "Loading preview…"
+              : loadError ?? "No data available."}
           </div>
         )}
 
@@ -292,13 +495,13 @@ export function ClosePositionPreviewModal(
                     Debt vs LP coverage
                   </h3>
 
-                  <div className="mt-3 rounded-xl border border-slate-800 bg-slate-900/80 p-4 space-y-3">
+                  <div className="mt-3 space-y-3 rounded-xl border border-slate-800 bg-slate-900/80 p-4">
                     <div>
                       <div className="text-xs text-slate-400">
                         Current debt ({preview.borrowSymbol})
                       </div>
                       <div className="text-sm font-semibold text-slate-50">
-                        {preview.totalDebtToken.toFixed(4)}{" "}
+                        {preview.totalDebtToken.toFixed(6)}{" "}
                         {preview.borrowSymbol}
                       </div>
                       <div className="text-[11px] text-slate-500">
@@ -306,12 +509,12 @@ export function ClosePositionPreviewModal(
                       </div>
                     </div>
 
-                    <div className="pt-2 border-t border-slate-800">
+                    <div className="border-t border-slate-800 pt-2">
                       <div className="text-xs text-slate-400">
                         From LP (borrow asset portion)
                       </div>
                       <div className="text-sm font-semibold text-slate-50">
-                        {preview.lpBorrowTokenAmount.toFixed(4)}{" "}
+                        {preview.lpBorrowTokenAmount.toFixed(6)}{" "}
                         {preview.borrowSymbol}
                       </div>
                       <div className="text-[11px] text-slate-500">
@@ -334,14 +537,14 @@ export function ClosePositionPreviewModal(
                     Extra {preview.borrowSymbol} needed to fully repay
                   </h3>
 
-                  <div className="mt-3 rounded-xl border border-slate-800 bg-slate-900/80 p-4 space-y-3">
+                  <div className="mt-3 space-y-3 rounded-xl border border-slate-800 bg-slate-900/80 p-4">
                     <div className="flex items-baseline justify-between">
                       <div>
                         <div className="text-xs text-slate-400">
                           Recommended minimum
                         </div>
                         <div className="text-sm font-semibold text-slate-50">
-                          {preview.minExtraFromUser.toFixed(4)}{" "}
+                          {preview.minExtraFromUser.toFixed(6)}{" "}
                           {preview.borrowSymbol}
                         </div>
                       </div>
@@ -350,34 +553,30 @@ export function ClosePositionPreviewModal(
                           Theoretical maximum
                         </div>
                         <div className="text-sm font-semibold text-slate-50">
-                          {preview.maxExtraFromUser.toFixed(4)}{" "}
+                          {preview.maxExtraFromUser.toFixed(6)}{" "}
                           {preview.borrowSymbol}
                         </div>
                       </div>
                     </div>
 
                     {/* 입력 / 버튼 */}
-                    <div className="pt-2 border-t border-slate-800">
+                    <div className="border-t border-slate-800 pt-2">
                       <label className="mb-1 block text-xs font-medium text-slate-400">
-                        Amount you will prepare ({preview.borrowSymbol})
+                        Amount you will approve ({preview.borrowSymbol})
                       </label>
                       <div className="flex gap-2">
                         <input
                           className="flex-1 rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-right text-sm text-slate-50"
                           value={extraAmountInput}
                           onChange={(e) => setExtraAmountInput(e.target.value)}
+                          disabled={mode === "done"}
                         />
-                        <button
-                          type="button"
-                          onClick={handleUseMin}
-                          className="rounded-lg border border-slate-700 px-2 py-1 text-[11px] text-slate-100 hover:bg-slate-800"
-                        >
-                          Use min
-                        </button>
+
                         <button
                           type="button"
                           onClick={handleUseMax}
-                          className="rounded-lg border border-slate-700 px-2 py-1 text-[11px] text-slate-100 hover:bg-slate-800"
+                          className="rounded-lg border border-slate-700 px-2 py-1 text-[11px] text-slate-100 hover:bg-slate-800 disabled:opacity-40"
+                          disabled={mode === "done"}
                         >
                           Use max
                         </button>
@@ -386,12 +585,12 @@ export function ClosePositionPreviewModal(
                       <div className="mt-2 text-[11px] text-slate-500">
                         Your wallet:{" "}
                         <span className="font-medium text-slate-100">
-                          {walletBorrowBalance.toFixed(4)}{" "}
+                          {walletBorrowBalance.toFixed(6)}{" "}
                           {preview.borrowSymbol}
                         </span>
                       </div>
 
-                      {insufficientBalance && (
+                      {insufficientBalance && mode !== "done" && (
                         <div className="mt-1 text-[11px] font-medium text-rose-400">
                           Not enough {preview.borrowSymbol} to safely close this
                           position.
@@ -407,7 +606,7 @@ export function ClosePositionPreviewModal(
                     LP tokens you will withdraw
                   </h3>
 
-                  <div className="mt-3 rounded-xl border border-slate-800 bg-slate-900/80 p-4 space-y-2 text-sm text-slate-100">
+                  <div className="mt-3 space-y-2 rounded-xl border border-slate-800 bg-slate-900/80 p-4 text-sm text-slate-100">
                     <div>
                       {preview.token0Symbol}: {preview.amount0FromLp.toFixed(4)}
                     </div>
@@ -423,6 +622,37 @@ export function ClosePositionPreviewModal(
               </div>
             </div>
 
+            {/* Estimated result (closePosition 이후) */}
+            {mode === "done" && (
+              <div className="mt-4 rounded-xl border border-emerald-500/40 bg-emerald-500/10 p-3 text-[11px] text-emerald-100">
+                <div className="text-xs font-semibold mb-1">
+                  Estimated result (from simulation)
+                </div>
+                <div>
+                  • Your Aave debt of{" "}
+                  <span className="font-semibold">
+                    {preview.totalDebtToken.toFixed(6)} {preview.borrowSymbol}
+                  </span>{" "}
+                  is expected to be fully repaid.
+                </div>
+                <div>
+                  • You will withdraw roughly{" "}
+                  <span className="font-semibold">
+                    {preview.amount0FromLp.toFixed(4)} {preview.token0Symbol}
+                  </span>{" "}
+                  and{" "}
+                  <span className="font-semibold">
+                    {preview.amount1FromLp.toFixed(4)} {preview.token1Symbol}
+                  </span>{" "}
+                  from the LP position.
+                </div>
+                <div className="mt-1 text-[10px] opacity-80">
+                  Values are based on the preview simulation; actual on-chain
+                  amounts may slightly differ.
+                </div>
+              </div>
+            )}
+
             {/* 안내 문구 */}
             <p className="mt-4 text-[11px] text-slate-500">
               If you provide less than the recommended minimum, the transaction
@@ -435,6 +665,7 @@ export function ClosePositionPreviewModal(
               <button
                 onClick={onClose}
                 className="rounded-full border border-slate-700 px-4 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800"
+                disabled={isRunningTx}
               >
                 Cancel
               </button>

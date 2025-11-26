@@ -3,6 +3,7 @@
 export type YourBorrow = {
   symbol: string; // 예: "WBTC"
   iconUrl?: string; // 예: "/tokens/wbtc.png"
+  debtToken: number;
   debtUsd: number; // 총 대출 USD
   borrowApy: number; // 0.05 -> 5.0%
   borrowPowerUsed: number; // 0.006 -> 0.6%
@@ -13,7 +14,8 @@ type Props = {
 };
 
 export function YourBorrowRow({ item }: Props) {
-  const { symbol, iconUrl, debtUsd, borrowApy, borrowPowerUsed } = item;
+  const { symbol, iconUrl, debtToken, debtUsd, borrowApy, borrowPowerUsed } =
+    item;
 
   return (
     <tr className="fc-row">
@@ -32,6 +34,9 @@ export function YourBorrowRow({ item }: Props) {
       {/* 2) Debt (총 대출 USD) */}
       <td className="fc-cell fc-cell-right">
         <div className="font-medium text-slate-900 leading-tight">
+          {debtToken.toFixed(2)}
+        </div>
+        <div className="fc-muted leading-tight">
           $
           {debtUsd.toLocaleString(undefined, {
             minimumFractionDigits: 2,

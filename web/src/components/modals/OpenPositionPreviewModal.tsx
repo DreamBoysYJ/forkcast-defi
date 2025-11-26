@@ -1,15 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-// [CHANGED] useWriteContract 추가
 import {
   useAccount,
   usePublicClient,
   useReadContract,
   useWriteContract,
 } from "wagmi";
-import { erc20Abi } from "viem";
+import { erc20Abi, parseUnits } from "viem";
 import { strategyRouterContract, strategyLensContract } from "@/lib/contracts";
+import { useRouter } from "next/navigation";
 
 export type AssetOption = {
   symbol: string;
@@ -31,9 +31,7 @@ const HF_1E18 = 10n ** 18n;
 export function OpenPositionPreviewModal(props: OpenPositionPreviewModalProps) {
   const { isOpen, onClose, supplyOptions, borrowOptions, initialSupplySymbol } =
     props;
-
-  if (!isOpen) return null;
-  if (supplyOptions.length === 0 || borrowOptions.length === 0) return null;
+  const router = useRouter(); // 👈 추가
 
   // ---- 1) Supply: AAVE만, Borrow: LINK만 사용하도록 필터 ----
   const supplyList =
@@ -70,7 +68,6 @@ export function OpenPositionPreviewModal(props: OpenPositionPreviewModalProps) {
 
   const { address } = useAccount();
   const publicClient = usePublicClient();
-  // [NEW] writeContractAsync: 실제 트랜잭션 보낼 때 사용
   const { writeContractAsync } = useWriteContract();
 
   // ---- 3) AAVE(공급 자산) 잔고/decimals ----
@@ -133,8 +130,9 @@ export function OpenPositionPreviewModal(props: OpenPositionPreviewModalProps) {
         return;
       }
 
-      // 여기서는 AAVE 18 decimals 가정 (decimals 를 써도 됨)
-      const supplyAmountBase = BigInt(Math.round(amountNum * 1e18));
+      // supplyAmount를 on-chain 단위로 (decimals 사용, 없으면 18)
+      const dec = aaveDecimals !== undefined ? Number(aaveDecimals) : 18;
+      const supplyAmountBase = parseUnits(supplyAmount, dec);
 
       // Target HF: 0 이면 0n 으로 보내서 라우터 디폴트(1.35) 사용
       const targetHfNum = Number(targetHF);
@@ -180,9 +178,11 @@ export function OpenPositionPreviewModal(props: OpenPositionPreviewModalProps) {
       // Final borrow: 토큰 단위
       let finalTokenUi: number;
       if (borrowDecimals !== undefined) {
-        const dec = Number(borrowDecimals);
+        const decBorrow = Number(borrowDecimals);
         finalTokenUi =
-          dec === 0 ? Number(finalToken) : Number(finalToken) / 10 ** dec;
+          decBorrow === 0
+            ? Number(finalToken)
+            : Number(finalToken) / 10 ** decBorrow;
       } else {
         finalTokenUi = Number(finalToken) / 1e18;
       }
@@ -210,6 +210,7 @@ export function OpenPositionPreviewModal(props: OpenPositionPreviewModalProps) {
         setFinalBorrowUsd(null);
       }
 
+      // preview가 끝나면 항상 1단계부터 시작
       setPhase("approve");
     } catch (err) {
       console.error("previewBorrow failed", err);
@@ -221,25 +222,20 @@ export function OpenPositionPreviewModal(props: OpenPositionPreviewModalProps) {
   // ---- 5) Approve / Open 버튼 ----
   const handleClickPrimary = async () => {
     if (!hasPreview) return;
+    if (!address) return;
 
-    // [CHANGED] 여기서 실제 approve 트랜잭션 발생
     if (phase === "approve") {
-      if (!address) return;
+      // 1단계: ERC20 approve(router, amount)
       setIsRunningTx(true);
       try {
-        // [NEW] UI 입력값(supplyAmount)을 on-chain 단위로 변환
         const amountNum = Number(supplyAmount) || 0;
         if (amountNum <= 0) {
           throw new Error("Supply amount must be > 0");
         }
 
-        // AAVE decimals 기준으로 변환 (없으면 18 fallback)
         const dec = aaveDecimals !== undefined ? Number(aaveDecimals) : 18;
-        const factor = 10 ** dec;
-        const amountBase = BigInt(Math.round(amountNum * factor));
+        const amountBase = parseUnits(supplyAmount, dec);
 
-        // [NEW] AAVE ERC20 에 approve(router, amountBase) 호출
-        //  → 여기서 MetaMask 팝업 뜸
         const txHash = await writeContractAsync({
           abi: erc20Abi,
           address: supplyAsset.address,
@@ -249,10 +245,10 @@ export function OpenPositionPreviewModal(props: OpenPositionPreviewModalProps) {
 
         console.log("approve tx hash", txHash);
 
-        // (원하면 여기서 waitForTransactionReceipt 도 가능)
+        // 필요하면 여기서 waitForTransactionReceipt 가능
         // await publicClient?.waitForTransactionReceipt({ hash: txHash });
 
-        // Approve 성공했다고 보고 다음 단계로
+        // Approve 성공 → 2단계로 전환
         setPhase("open");
       } catch (err) {
         console.error("approve failed", err);
@@ -260,19 +256,46 @@ export function OpenPositionPreviewModal(props: OpenPositionPreviewModalProps) {
         setIsRunningTx(false);
       }
     } else {
-      // 실제 openPosition 호출은 나중에 구현
+      // 2단계: 실제 openPosition 호출
       setIsRunningTx(true);
       try {
-        console.log(
-          "[TODO] openPosition with",
-          supplyAsset.symbol,
-          supplyAmount,
-          "borrow:",
-          borrowAsset.symbol,
-          "targetHF:",
-          targetHF
-        );
+        const amountNum = Number(supplyAmount) || 0;
+        if (amountNum <= 0) {
+          throw new Error("Supply amount must be > 0");
+        }
+
+        const dec = aaveDecimals !== undefined ? Number(aaveDecimals) : 18;
+        const supplyAmountBase = parseUnits(supplyAmount, dec);
+
+        const targetHfNum = Number(targetHF);
+        const targetHF1e18 =
+          !targetHF || isNaN(targetHfNum) || targetHfNum <= 0
+            ? 0n
+            : BigInt(Math.round(targetHfNum * 1e18));
+
+        // 가스 5,000,000 고정
+        const txHash = await writeContractAsync({
+          abi: strategyRouterContract.abi,
+          address: strategyRouterContract.address,
+          functionName: "openPosition",
+          args: [
+            supplyAsset.address,
+            supplyAmountBase,
+            borrowAsset.address,
+            targetHF1e18,
+          ],
+          gas: 5_000_000n,
+        });
+
+        console.log("openPosition tx hash", txHash);
+
+        // 필요하면 여기서도 waitForTransactionReceipt 가능
+        // await publicClient?.waitForTransactionReceipt({ hash: txHash });
+
         onClose();
+        router.refresh();
+      } catch (err) {
+        console.error("openPosition failed", err);
       } finally {
         setIsRunningTx(false);
       }
@@ -281,6 +304,9 @@ export function OpenPositionPreviewModal(props: OpenPositionPreviewModalProps) {
 
   const primaryLabel =
     phase === "approve" ? "Approve & continue" : "Confirm open position";
+
+  if (!isOpen) return null;
+  if (supplyOptions.length === 0 || borrowOptions.length === 0) return null;
 
   // ---- 6) 렌더 ----
   const showPreview = hasPreview;

@@ -1,22 +1,21 @@
-// components/dashboard/uniswap/UniswapPositionRow.tsx
+// src/components/dashboard/uniswap/UniswapPositionRow.tsx
 "use client";
 
-// ✅ 이 타입을 먼저 선언하고 export
 export type UniPositionRowData = {
   tokenId: number;
   token0Symbol: string;
   token1Symbol: string;
   token0IconUrl: string;
   token1IconUrl: string;
-  rangeLabel: string; // 예: "1,500 – 2,500"
+  rangeLabel: string;
   inRange: boolean;
-  amount0NowLabel: string; // 예: "AAVE 100.0000"
-  amount1NowLabel: string; // 예: "WBTC 0.3000"
+  amount0NowLabel: string; // 예: "AAVE 70.83"
+  amount1NowLabel: string; // 예: "LINK 12.34"
 };
 
 type Props = {
   position: UniPositionRowData;
-  onClickCollect: (p: UniPositionRowData) => void;
+  onClickCollect: (pos: UniPositionRowData) => void;
 };
 
 export function UniswapPositionRow({ position, onClickCollect }: Props) {
@@ -32,68 +31,71 @@ export function UniswapPositionRow({ position, onClickCollect }: Props) {
     amount1NowLabel,
   } = position;
 
+  const statusLabel = inRange ? "In range" : "Out of range";
+  const statusDotClass = inRange ? "bg-emerald-400" : "bg-amber-400";
+  const statusBgClass = inRange ? "bg-emerald-950/60" : "bg-amber-950/60";
+  const statusTextClass = inRange ? "text-emerald-200" : "text-amber-200";
+
   return (
-    <tr className="border-b border-slate-800/60 last:border-0">
-      {/* 1) POOL */}
-      <td className="px-6 py-3">
+    <tr className="border-t border-slate-800/70">
+      {/* Pool */}
+      <td className="px-6 py-4 align-middle">
         <div className="flex items-center gap-3">
-          {/* 두 개 아이콘 겹치게 */}
-          <div className="flex -space-x-1">
-            <img
-              src={token0IconUrl}
-              alt={token0Symbol}
-              className="h-7 w-7 rounded-full border border-slate-900 bg-slate-950 object-cover"
-            />
-            <img
-              src={token1IconUrl}
-              alt={token1Symbol}
-              className="h-7 w-7 rounded-full border border-slate-900 bg-slate-950 object-cover"
-            />
+          <div className="flex -space-x-2">
+            <div className="h-8 w-8 overflow-hidden rounded-full border border-slate-900 bg-slate-800">
+              <img
+                src={token0IconUrl}
+                alt={token0Symbol}
+                className="h-full w-full object-cover"
+              />
+            </div>
+            <div className="h-8 w-8 overflow-hidden rounded-full border border-slate-900 bg-slate-800">
+              <img
+                src={token1IconUrl}
+                alt={token1Symbol}
+                className="h-full w-full object-cover"
+              />
+            </div>
           </div>
           <div className="flex flex-col">
             <span className="text-sm font-medium text-slate-50">
               {token0Symbol} / {token1Symbol}
             </span>
-            <span className="text-[11px] text-slate-500">
+            <span className="text-[11px] text-slate-400">
               Position #{tokenId}
             </span>
           </div>
         </div>
       </td>
 
-      {/* 2) RANGE */}
-      <td className="px-6 py-3 text-sm text-slate-50">{rangeLabel}</td>
+      {/* Range */}
+      <td className="px-6 py-4 align-middle">
+        <span className="text-sm text-slate-100">{rangeLabel}</span>
+      </td>
 
-      {/* 3) LIQUIDITY: 현재 토큰 양 두 줄 */}
-      <td className="px-6 py-3 text-right">
-        <div className="text-sm font-medium text-slate-50">
-          {amount0NowLabel}
-        </div>
-        <div className="text-sm font-medium text-slate-50">
-          {amount1NowLabel}
+      {/* Liquidity */}
+      <td className="px-6 py-4 align-middle">
+        <div className="flex flex-col text-sm text-slate-100">
+          <span>{amount0NowLabel}</span>
+          <span>{amount1NowLabel}</span>
         </div>
       </td>
 
-      {/* 4) STATUS */}
-      <td className="px-6 py-3">
-        {inRange ? (
-          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-300">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-            In range
-          </span>
-        ) : (
-          <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2.5 py-1 text-[11px] font-medium text-amber-300">
-            <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
-            Out of range
-          </span>
-        )}
+      {/* Status */}
+      <td className="px-6 py-4 align-middle">
+        <span
+          className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-medium ${statusBgClass} ${statusTextClass}`}
+        >
+          <span className={`h-1.5 w-1.5 rounded-full ${statusDotClass}`} />
+          {statusLabel}
+        </span>
       </td>
 
-      {/* 5) ACTION */}
-      <td className="px-6 py-3 text-right">
+      {/* Action */}
+      <td className="px-6 py-4 align-middle text-right">
         <button
-          className="rounded-full border border-indigo-400/40 bg-indigo-500/10 px-4 py-1.5 text-xs font-medium text-indigo-100 hover:bg-indigo-500/20"
           onClick={() => onClickCollect(position)}
+          className="rounded-full bg-indigo-500 px-4 py-1.5 text-xs font-semibold text-slate-50 hover:bg-indigo-400"
         >
           Collect fees
         </button>

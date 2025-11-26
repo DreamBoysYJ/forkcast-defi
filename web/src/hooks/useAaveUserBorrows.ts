@@ -61,6 +61,8 @@ type UserAaveOverview = {
 // YourBorrowRow에서 쓰는 타입 형태랑 맞춰줌
 export type YourBorrowRowData = {
   symbol: string;
+  debtToken: number; // ✅ 새로 추가 (예: 325.0 LINK)
+
   debtUsd: number; // 표에 찍히는 USD
   borrowApy: number; // 0.05 → 5%
   borrowPowerUsed: number; // 0.006 → 0.6%
@@ -239,6 +241,7 @@ export function useAaveUserBorrows() {
 
       rows.push({
         symbol: reserve.symbol,
+        debtToken,
         debtUsd,
         borrowApy,
         borrowPowerUsed,

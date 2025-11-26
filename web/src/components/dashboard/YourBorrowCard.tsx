@@ -27,6 +27,7 @@ export function YourBorrowCard() {
   const items: YourBorrow[] = rows.map((r) => ({
     symbol: r.symbol,
     iconUrl: getAssetIcon(r.symbol),
+    debtToken: r.debtToken,
     debtUsd: r.debtUsd,
     borrowApy: r.borrowApy,
     borrowPowerUsed: r.borrowPowerUsed,

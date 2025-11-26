@@ -6,24 +6,47 @@ import {
   StrategyPositionRow,
   type StrategyPositionRowData,
 } from "./StrategyPositionRow";
-
 import { ClosePositionPreviewModal } from "@/components/modals/ClosePositionPreviewModal";
+import { useStrategyPositionView } from "@/hooks/useStrategyPositionView";
 
-type Props = {
-  data: StrategyPositionRowData;
-  onClickPreviewClose?: (tokenId: number) => void;
+// 주소 → 심볼/아이콘 매핑 (환경변수 기반)
+const TOKEN_META: Record<string, { symbol: string; iconUrl: string }> = {
+  [(process.env.NEXT_PUBLIC_AAVE_UNDERLYING_SEPOLIA ?? "").toLowerCase()]: {
+    symbol: "AAVE",
+    iconUrl: "/tokens/aave.png",
+  },
+  [(process.env.NEXT_PUBLIC_LINK_UNDERLYING_SEPOLIA ?? "").toLowerCase()]: {
+    symbol: "LINK",
+    iconUrl: "/tokens/link.png",
+  },
+  [(process.env.NEXT_PUBLIC_WBTC_UNDERLYING_SEPOLIA ?? "").toLowerCase()]: {
+    symbol: "WBTC",
+    iconUrl: "/tokens/wbtc.png",
+  },
 };
 
-export function StrategyPositionCard({ data }: Props) {
-  // 1) 포지션 여부 / 상태
-  const hasPosition = !!data && data.tokenId !== 0;
-  const isOpen = data?.isOpen ?? false;
+function getTokenMeta(addr: `0x${string}`) {
+  const key = addr.toLowerCase();
+  const meta = TOKEN_META[key];
+
+  if (meta) return meta;
+
+  // fallback: 주소 축약 표시
+  const short = `${addr.slice(0, 6)}...${addr.slice(-4)}`;
+  return {
+    symbol: short,
+    iconUrl: "/tokens/default.png",
+  };
+}
+
+export function StrategyPositionCard() {
+  // 1) 온체인 통합 뷰 훅
+  const { view, isLoading, isError } = useStrategyPositionView();
 
   // 2) Close preview 모달 상태
   const [isCloseModalOpen, setIsCloseModalOpen] = useState(false);
   const [selectedTokenId, setSelectedTokenId] = useState<number | null>(null);
 
-  // StrategyPositionRow에서 "Preview close" 버튼 눌렀을 때 호출
   const handlePreviewCloseClick = (tokenId: number) => {
     setSelectedTokenId(tokenId);
     setIsCloseModalOpen(true);
@@ -33,6 +56,58 @@ export function StrategyPositionCard({ data }: Props) {
     setIsCloseModalOpen(false);
   };
 
+  // 3) 온체인 view → Row에서 쓰는 StrategyPositionRowData로 변환
+  let rowData: StrategyPositionRowData | null = null;
+
+  if (view && view.tokenId !== 0n) {
+    // 🔥 "닫힌" 포지션은 아예 없는 것으로 취급
+    const isEffectivelyClosed =
+      !view.isOpen ||
+      (view.totalCollateralUsd === 0 && view.totalDebtUsd === 0);
+
+    if (!isEffectivelyClosed) {
+      const supplyToken = getTokenMeta(view.supplyAsset);
+      const borrowToken = getTokenMeta(view.borrowAsset);
+      const poolToken0 = getTokenMeta(view.uniToken0);
+      const poolToken1 = getTokenMeta(view.uniToken1);
+
+      const inRange =
+        view.currentTick >= view.tickLower &&
+        view.currentTick <= view.tickUpper;
+
+      const rangeLabel = `${view.tickLower} ~ ${view.tickUpper}`;
+      const currentTickLabel = `Current tick ≈ ${view.currentTick}`;
+
+      rowData = {
+        tokenId: Number(view.tokenId),
+        isOpen: view.isOpen,
+
+        supplyToken,
+        borrowToken,
+        owner: view.owner,
+        vault: view.vault,
+
+        poolToken0,
+        poolToken1,
+        amount0Now: view.amount0Now,
+        amount1Now: view.amount1Now,
+        rangeLabel,
+        currentTickLabel,
+        inRange,
+
+        totalCollateralUsd: view.totalCollateralUsd,
+        totalDebtUsd: view.totalDebtUsd,
+        availableBorrowUsd: view.availableBorrowUsd,
+        ltv: view.ltv,
+        liquidationThreshold: view.liqThreshold,
+        healthFactor: view.healthFactor,
+      };
+    }
+  }
+
+  const hasPosition = !!rowData && rowData.tokenId !== 0;
+  const isOpen = rowData?.isOpen ?? false;
+
   return (
     <>
       {/* 메인 카드 */}
@@ -41,7 +116,7 @@ export function StrategyPositionCard({ data }: Props) {
         <div className="flex items-center justify-between border-b border-slate-800/60 px-6 py-4">
           <div className="flex flex-col">
             <h2 className="text-xl font-semibold text-slate-50">
-              Strategy overview (demo)
+              Strategy overview
             </h2>
             <p className="text-sm text-slate-400">
               Supply → Borrow → LP on Uniswap v4
@@ -74,26 +149,34 @@ export function StrategyPositionCard({ data }: Props) {
 
         {/* 본문 */}
         <div className="px-6 py-5">
-          {data ? (
-            <StrategyPositionRow
-              data={data}
-              // ✅ Row의 "Preview close" 버튼이 이 핸들러를 부름
-              onClickPreviewClose={handlePreviewCloseClick}
-            />
-          ) : (
+          {isLoading ? (
+            <div className="py-8 text-center text-sm text-slate-500">
+              Loading strategy position...
+            </div>
+          ) : isError ? (
+            <div className="py-8 text-center text-sm text-red-400">
+              Failed to load strategy position. Check RPC / wallet connection.
+            </div>
+          ) : !rowData ? (
             <div className="py-8 text-center text-sm text-slate-500">
               No strategy position found yet. Open a one-shot position first.
             </div>
+          ) : (
+            <StrategyPositionRow
+              data={rowData}
+              onClickPreviewClose={handlePreviewCloseClick}
+            />
           )}
         </div>
       </div>
 
       {/* Close preview 모달 */}
-      {selectedTokenId !== null && (
+      {selectedTokenId !== null && rowData && (
         <ClosePositionPreviewModal
           isOpen={isCloseModalOpen}
           onClose={handleCloseModal}
           tokenId={selectedTokenId}
+          totalDebtUsdFromCard={rowData.totalDebtUsd}
         />
       )}
     </>

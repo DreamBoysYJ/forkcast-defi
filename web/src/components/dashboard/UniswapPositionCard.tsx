@@ -1,60 +1,215 @@
-// components/dashboard/uniswap/UniswapPositionCard.tsx
+// src/components/dashboard/uniswap/UniswapPositionCard.tsx
 "use client";
 
 import { useState } from "react";
+import { useConfig } from "wagmi";
+import {
+  simulateContract,
+  writeContract,
+  waitForTransactionReceipt,
+} from "@wagmi/core";
+
 import {
   UniswapPositionRow,
   type UniPositionRowData,
 } from "./UniswapPositionRow";
 import { CollectFeesModal } from "../modals/CollectFeesModal";
+import { useUserUniPositions } from "@/hooks/useUserUniPositions";
+import { strategyRouterContract } from "@/lib/contracts";
 
-const mockPositions: UniPositionRowData[] = [
-  {
-    tokenId: 1,
-    token0Symbol: "AAVE",
-    token1Symbol: "WBTC",
-    token0IconUrl: "/tokens/aave.png",
-    token1IconUrl: "/tokens/wbtc.png",
-    rangeLabel: "1,500 – 2,500",
-    inRange: true,
-    amount0NowLabel: "AAVE 100.0000",
-    amount1NowLabel: "WBTC 0.3000",
+// LP 테이블용 토큰 메타
+const TOKEN_META: Record<
+  string,
+  { symbol: string; icon: string; decimals: number }
+> = {
+  // token0: AAVE
+  "0x88541670e55cc00beefd87eb59edd1b7c511ac9a": {
+    symbol: "AAVE",
+    icon: "/tokens/aave.png",
+    decimals: 18,
   },
-  {
-    tokenId: 2,
-    token0Symbol: "AAVE",
-    token1Symbol: "WBTC",
-    token0IconUrl: "/tokens/aave.png",
-    token1IconUrl: "/tokens/wbtc.png",
-    rangeLabel: "2,500 – 3,500",
-    inRange: false,
-    amount0NowLabel: "AAVE 50.0000",
-    amount1NowLabel: "WBTC 0.1000",
+  // token1: LINK
+  "0xf8fb3713d459d7c1018bd0a49d19b4c44290ebe5": {
+    symbol: "LINK",
+    icon: "/tokens/link.png",
+    decimals: 18,
   },
-];
+};
+
+function getTokenMeta(addr: `0x${string}` | undefined) {
+  if (!addr) {
+    return { symbol: "TOKEN", icon: "/tokens/default.png", decimals: 18 };
+  }
+  const found = TOKEN_META[addr.toLowerCase()];
+  if (found) return found;
+  return { symbol: "TOKEN", icon: "/tokens/default.png", decimals: 18 };
+}
+
+/**
+ * amount: bigint (보통 18자리)
+ * minFrac / maxFrac 으로 소수 자릿수 범위 조절
+ * - LP amount: (2, 2)
+ * - 이번에 모인 수수료: (0, 18)
+ */
+function formatTokenAmount(
+  amount: bigint,
+  decimals: number,
+  minFrac = 2,
+  maxFrac = 2
+): string {
+  if (amount === 0n) {
+    return (0).toLocaleString("en-US", {
+      minimumFractionDigits: minFrac,
+      maximumFractionDigits: maxFrac,
+    });
+  }
+
+  const num = Number(amount) / 10 ** decimals;
+  if (!Number.isFinite(num)) return "0";
+
+  return num.toLocaleString("en-US", {
+    minimumFractionDigits: minFrac,
+    maximumFractionDigits: maxFrac,
+  });
+}
+
+function formatTickRange(lower: number, upper: number): string {
+  return `${lower.toLocaleString("en-US")} ~ ${upper.toLocaleString("en-US")}`;
+}
+
+type CollectedFees = {
+  amount0Label: string;
+  amount1Label: string;
+};
 
 export function UniswapPositionCard() {
-  const [positions] = useState<UniPositionRowData[]>(mockPositions);
+  const { tokenIds, positions, isLoading, isError } = useUserUniPositions();
+  const wagmiConfig = useConfig();
+
   const [selectedPosition, setSelectedPosition] =
     useState<UniPositionRowData | null>(null);
   const [isCollectOpen, setIsCollectOpen] = useState(false);
-  const [isCollecting, setIsCollecting] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  // StrategyLens 원시 포지션 → 테이블 데이터로 변환
+  const rows: UniPositionRowData[] =
+    positions
+      ?.map((pos, idx) => {
+        const idBig = tokenIds?.[idx] ?? BigInt(idx);
+
+        // 🔥 amount0Now, amount1Now 둘 다 0이면 "실질적으로 없는 포지션" → 테이블에서 숨김
+        const isEmptyPosition = pos.amount0Now === 0n && pos.amount1Now === 0n;
+        if (isEmptyPosition) return null;
+
+        const meta0 = getTokenMeta(pos.token0);
+        const meta1 = getTokenMeta(pos.token1);
+
+        // LP amounts(왼쪽) 은 2자리까지만
+        const amount0Label = `${meta0.symbol} ${formatTokenAmount(
+          pos.amount0Now,
+          meta0.decimals,
+          2,
+          2
+        )}`;
+        const amount1Label = `${meta1.symbol} ${formatTokenAmount(
+          pos.amount1Now,
+          meta1.decimals,
+          2,
+          2
+        )}`;
+
+        const inRange =
+          pos.currentTick >= pos.tickLower && pos.currentTick <= pos.tickUpper;
+
+        return {
+          tokenId: Number(idBig),
+          token0Symbol: meta0.symbol,
+          token1Symbol: meta1.symbol,
+          token0IconUrl: meta0.icon,
+          token1IconUrl: meta1.icon,
+          rangeLabel: formatTickRange(pos.tickLower, pos.tickUpper),
+          inRange,
+          amount0NowLabel: amount0Label,
+          amount1NowLabel: amount1Label,
+        };
+      })
+      .filter((row): row is UniPositionRowData => row !== null) ?? [];
 
   const openCollectModal = (pos: UniPositionRowData) => {
     setSelectedPosition(pos);
     setIsCollectOpen(true);
   };
 
-  const handleConfirmCollect = async () => {
-    if (!selectedPosition) return;
-    setIsCollecting(true);
+  // 1️⃣ 미리보기(시뮬레이션) – 모달에서 "Preview fees" 눌렀을 때
+  const handlePreviewCollect = async (): Promise<CollectedFees> => {
+    if (!selectedPosition) {
+      return {
+        amount0Label: "0",
+        amount1Label: "0",
+      };
+    }
+
+    setIsProcessing(true);
     try {
-      // TODO: 여기서 실제 router.collectFees(tokenId) 호출
-      console.log("[TODO] collectFees for tokenId", selectedPosition.tokenId);
-      // 성공하면 모달 닫기
-      setIsCollectOpen(false);
+      const tokenIdBig = BigInt(selectedPosition.tokenId);
+
+      // selectedPosition.tokenId 에 해당하는 원시 포지션 찾기
+      const idx =
+        tokenIds?.findIndex((id) => Number(id) === selectedPosition.tokenId) ??
+        -1;
+      const rawPos = idx >= 0 ? positions?.[idx] : undefined;
+
+      const meta0 = rawPos ? getTokenMeta(rawPos.token0) : { decimals: 18 };
+      const meta1 = rawPos ? getTokenMeta(rawPos.token1) : { decimals: 18 };
+
+      const { result } = await simulateContract(wagmiConfig, {
+        ...strategyRouterContract,
+        functionName: "collectFees",
+        args: [tokenIdBig],
+      });
+
+      const [raw0, raw1] = result as readonly [bigint, bigint];
+
+      console.log("[collectFees][preview] tokenId", tokenIdBig.toString());
+      console.log(
+        "[collectFees][preview] raw collected0 / 1",
+        raw0.toString(),
+        raw1.toString()
+      );
+
+      const formatted0 = formatTokenAmount(raw0, meta0.decimals, 0, 18);
+      const formatted1 = formatTokenAmount(raw1, meta1.decimals, 0, 18);
+
+      return {
+        amount0Label: `${selectedPosition.token0Symbol} ${formatted0}`,
+        amount1Label: `${selectedPosition.token1Symbol} ${formatted1}`,
+      };
     } finally {
-      setIsCollecting(false);
+      setIsProcessing(false);
+    }
+  };
+
+  // 2️⃣ 실제 collect 실행 – 모달에서 "Collect fees" 눌렀을 때
+  const handleExecuteCollect = async (): Promise<void> => {
+    if (!selectedPosition) return;
+    setIsProcessing(true);
+
+    try {
+      const tokenIdBig = BigInt(selectedPosition.tokenId);
+
+      const hash = await writeContract(wagmiConfig, {
+        ...strategyRouterContract,
+        functionName: "collectFees",
+        args: [tokenIdBig],
+      });
+
+      console.log("[collectFees][execute] tx hash", hash);
+
+      await waitForTransactionReceipt(wagmiConfig, { hash });
+
+      // 필요하면 여기서 Uniswap 포지션 리스트 refetch 트리거
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -64,7 +219,7 @@ export function UniswapPositionCard() {
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4">
           <h2 className="text-[15px] font-semibold text-slate-50">
-            Your Uniswap LP (demo)
+            Your Uniswap LP
           </h2>
           <span className="text-[11px] text-slate-400">
             v4 positions – data from StrategyLens
@@ -84,13 +239,42 @@ export function UniswapPositionCard() {
               </tr>
             </thead>
             <tbody className="bg-slate-900/60">
-              {positions.map((position) => (
-                <UniswapPositionRow
-                  key={position.tokenId}
-                  position={position}
-                  onClickCollect={openCollectModal}
-                />
-              ))}
+              {isLoading ? (
+                <tr>
+                  <td
+                    colSpan={5}
+                    className="px-6 py-6 text-center text-xs text-slate-400"
+                  >
+                    Loading Uniswap v4 positions...
+                  </td>
+                </tr>
+              ) : isError ? (
+                <tr>
+                  <td
+                    colSpan={5}
+                    className="px-6 py-6 text-center text-xs text-red-500"
+                  >
+                    Failed to load Uniswap positions. Check console / RPC.
+                  </td>
+                </tr>
+              ) : rows.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={5}
+                    className="px-6 py-6 text-center text-xs text-slate-400"
+                  >
+                    No Uniswap v4 LP positions yet.
+                  </td>
+                </tr>
+              ) : (
+                rows.map((position) => (
+                  <UniswapPositionRow
+                    key={position.tokenId}
+                    position={position}
+                    onClickCollect={openCollectModal}
+                  />
+                ))
+              )}
             </tbody>
           </table>
         </div>
@@ -100,8 +284,9 @@ export function UniswapPositionCard() {
         isOpen={isCollectOpen}
         onClose={() => setIsCollectOpen(false)}
         position={selectedPosition}
-        isProcessing={isCollecting}
-        onConfirm={handleConfirmCollect}
+        isProcessing={isProcessing}
+        onPreview={handlePreviewCollect}
+        onExecute={handleExecuteCollect}
       />
     </>
   );

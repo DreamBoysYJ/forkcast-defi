@@ -184,13 +184,55 @@ export function useAaveBorrowAssets() {
     reserveDataResults &&
     oracleResults
   ) {
-    // 금리 맵
+    // ---- 1) 금리 맵 (asset 주소 기준) ----
     const rateByAsset = new Map<string, ReserveRateData>();
     for (const r of rates) {
       rateByAsset.set(r.asset.toLowerCase(), r);
     }
 
-    // 가격 맵
+    // ---- 2) reserveData 맵 (asset 주소 기준) ----
+    const reserveDataByAsset = new Map<
+      string,
+      readonly [
+        bigint,
+        bigint,
+        bigint,
+        bigint,
+        bigint,
+        bigint,
+        bigint,
+        bigint,
+        bigint,
+        bigint,
+        bigint,
+        number
+      ]
+    >();
+
+    for (let i = 0; i < assets.length; i++) {
+      const res = reserveDataResults[i];
+      const tuple = res?.result as
+        | readonly [
+            bigint,
+            bigint,
+            bigint,
+            bigint,
+            bigint,
+            bigint,
+            bigint,
+            bigint,
+            bigint,
+            bigint,
+            bigint,
+            number
+          ]
+        | undefined;
+      if (tuple) {
+        reserveDataByAsset.set(assets[i].toLowerCase(), tuple);
+      }
+    }
+
+    // ---- 3) 가격 맵 (asset 주소 기준) ----
     const pricesArray =
       (oracleResults[0]?.result as readonly bigint[] | undefined) ?? [];
     const baseUnit = (oracleResults[1]?.result as bigint | undefined) ?? 0n;
@@ -202,34 +244,17 @@ export function useAaveBorrowAssets() {
       }
     }
 
+    // ---- 4) 실제 rows 생성 ----
     rows = reserves
-      // ---- 필터 조건 (borrow 카드용) ----
-      // - isActive == true
-      // - !isFrozen
-      // - !paused
-      // - borrowingEnabled == true
+      // 필터 조건 (borrow 카드용)
       .filter(
         (r) => r.isActive && !r.isFrozen && !r.paused && r.borrowingEnabled
       )
-      .map((r, idx) => {
+      .map((r) => {
         const key = r.asset.toLowerCase();
+
         const rate = rateByAsset.get(key);
-        const reserveTuple = reserveDataResults[idx]?.result as
-          | readonly [
-              bigint,
-              bigint,
-              bigint,
-              bigint,
-              bigint,
-              bigint,
-              bigint,
-              bigint,
-              bigint,
-              bigint,
-              bigint,
-              number
-            ]
-          | undefined;
+        const reserveTuple = reserveDataByAsset.get(key);
 
         let available = 0;
         let availableUsd = 0;
@@ -267,6 +292,18 @@ export function useAaveBorrowAssets() {
             ? 0
             : (Number(variableBorrowRateRay) / Number(RAY)) * 100;
 
+        // 디버깅 원하면 여기 찍어봐도 됨
+        // console.log(
+        //   "[borrow row]",
+        //   r.symbol,
+        //   "available:",
+        //   available,
+        //   "availableUsd:",
+        //   availableUsd,
+        //   "apy:",
+        //   apyPercent
+        // );
+
         return {
           asset: r.asset,
           symbol: r.symbol,
@@ -274,10 +311,10 @@ export function useAaveBorrowAssets() {
           availableUsd,
           apyPercent,
         };
-      })
-      .filter((row) => row.available > 0);
+      });
+    // 유동성 0인 항목은 숨김
+    // .filter((row) => row.available > 0);
 
-    // 디버깅용
     // console.log("borrow rows", rows);
   }
 

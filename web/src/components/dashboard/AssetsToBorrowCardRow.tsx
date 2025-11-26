@@ -32,9 +32,9 @@ export function AssetsToBorrowCardRow({ asset }: Props) {
       {/* 2) Available (토큰 양 + USD) */}
       <td className="fc-cell fc-cell-right">
         <div className="font-medium text-slate-900 leading-tight">
-          {available.toFixed(2)}
+          ✓{/* {available.toFixed(2)} */}
         </div>
-        <div className="fc-muted leading-tight">${availableUsd.toFixed(2)}</div>
+        {/* <div className="fc-muted leading-tight">${availableUsd.toFixed(2)}</div> */}
       </td>
 
       {/* 3) Borrow APY */}

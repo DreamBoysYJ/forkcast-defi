@@ -1,5 +1,6 @@
-// src/components/modals/DemoTraderModal.tsx
 "use client";
+
+import { useState } from "react";
 
 type DemoTraderModalProps = {
   isOpen: boolean;
@@ -7,66 +8,98 @@ type DemoTraderModalProps = {
 };
 
 export function DemoTraderModal({ isOpen, onClose }: DemoTraderModalProps) {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   if (!isOpen) return null;
 
-  const handleRunDemo = async () => {
-    // TODO: 여기서 실제 demo trader 스왑 트랜잭션(or 백엔드 호출) 연결
-    console.log("[TODO] run demo trader swaps (fake volume)");
+  const handleRunDemoTrader = async () => {
+    setIsSubmitting(true);
+
+    try {
+      const res = await fetch("/api/demo-trader/run", {
+        method: "POST",
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || "Request failed");
+      }
+
+      // 굳이 안 써도 되지만, 혹시 백엔드에서 message 내려줄 수도 있으니 남겨둠
+      const data = (await res.json().catch(() => ({}))) as {
+        message?: string;
+      };
+
+      const msg =
+        data.message ??
+        "Demo trader finished. All demo swaps have been executed.\nCheck your Uniswap LP card to see updated fees.";
+
+      // ✅ 여기서 유저가 alert 닫을 때까지 기다렸다가
+      alert(msg);
+      // ✅ 그 다음에 모달 닫기
+      onClose();
+    } catch (err: any) {
+      const msg =
+        err?.message ??
+        "Failed to run demo trader. Please check server logs or try again.";
+      alert(msg);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/70">
-      <div className="w-full max-w-xl rounded-2xl border border-slate-800 bg-slate-900/95 p-6 shadow-xl">
-        {/* 헤더 */}
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 px-4">
+      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+        {/* Header */}
         <div className="mb-4 flex items-center justify-between">
-          <div>
-            <h2 className="text-lg font-semibold text-slate-50">
-              Demo trader – simulate swap volume
-            </h2>
-            <p className="text-xs text-slate-400">
-              Run a fake trader that performs swaps on your Uniswap v4 pool to
-              generate LP fees (Sepolia only).
-            </p>
-          </div>
+          <h2 className="text-base font-semibold text-slate-900">
+            Run demo trader
+          </h2>
           <button
+            type="button"
             onClick={onClose}
-            className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-300 hover:bg-slate-800"
+            className="text-sm text-slate-400 hover:text-slate-600"
+            disabled={isSubmitting}
           >
-            Esc
+            ✕
           </button>
         </div>
 
-        {/* 본문 */}
-        <div className="space-y-3 text-sm text-slate-100">
-          <p>
-            This demo trader will send a series of small swaps through your
-            AAVE/WBTC pool on Sepolia. The goal is to create visible LP fees for
-            your one-shot position.
-          </p>
-          <ul className="list-disc space-y-1 pl-5 text-xs text-slate-300">
-            <li>Only runs on testnet (Sepolia).</li>
-            <li>Targets the same pool used by your strategy position.</li>
-            <li>Your LP position should see accumulated fees after a while.</li>
-          </ul>
-          <p className="text-[11px] text-slate-500">
-            This is for demo only – it does not guarantee profit and should not
-            be used on mainnet.
-          </p>
-        </div>
+        {/* Body description */}
+        <p className="text-sm leading-relaxed text-slate-700">
+          The demo trader uses a pre-funded wallet to perform
+          <br />
+          <span className="font-medium">
+            small swaps in the AAVE / LINK pool
+          </span>{" "}
+          back and forth,
+          <br />
+          so that your Uniswap v4 LP position can start earning fees.
+        </p>
+        <p className="mt-3 text-[11px] text-slate-400">
+          • This runs only on the Sepolia testnet – no real funds are used.
+          <br />• With one click, the backend will trigger multiple swaps using
+          a dedicated “demo trader” wallet.
+        </p>
 
-        {/* 푸터 버튼 */}
-        <div className="mt-6 flex items-center justify-end gap-3">
+        {/* Buttons */}
+        <div className="mt-6 flex items-center justify-end gap-2">
           <button
+            type="button"
             onClick={onClose}
-            className="rounded-full border border-slate-700 px-4 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800"
+            className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50"
+            disabled={isSubmitting}
           >
             Cancel
           </button>
           <button
-            onClick={handleRunDemo}
-            className="rounded-full bg-indigo-500 px-5 py-2 text-xs font-semibold text-slate-950 hover:bg-indigo-400"
+            type="button"
+            onClick={handleRunDemoTrader}
+            disabled={isSubmitting}
+            className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Run demo swaps
+            {isSubmitting ? "Running..." : "Run demo trader"}
           </button>
         </div>
       </div>
