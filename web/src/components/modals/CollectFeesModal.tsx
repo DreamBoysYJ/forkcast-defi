@@ -88,6 +88,7 @@ export function CollectFeesModal({
     }
 
     // 3️⃣ 이미 실행까지 끝난 상태에서 다시 누르면 → 모달 닫기
+    alert("Collect Fees Completed!!!");
     onClose();
   };
 

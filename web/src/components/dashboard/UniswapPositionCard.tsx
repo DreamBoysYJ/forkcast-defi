@@ -83,7 +83,8 @@ type CollectedFees = {
 };
 
 export function UniswapPositionCard() {
-  const { tokenIds, positions, isLoading, isError } = useUserUniPositions();
+  const { tokenIds, positions, isLoading, isError, isRateLimited } =
+    useUserUniPositions();
   const wagmiConfig = useConfig();
 
   const [selectedPosition, setSelectedPosition] =
@@ -97,7 +98,7 @@ export function UniswapPositionCard() {
       ?.map((pos, idx) => {
         const idBig = tokenIds?.[idx] ?? BigInt(idx);
 
-        // 🔥 amount0Now, amount1Now 둘 다 0이면 "실질적으로 없는 포지션" → 테이블에서 숨김
+        // amount0Now, amount1Now 둘 다 0이면 "실질적으로 없는 포지션" → 테이블에서 숨김
         const isEmptyPosition = pos.amount0Now === 0n && pos.amount1Now === 0n;
         if (isEmptyPosition) return null;
 
@@ -248,13 +249,26 @@ export function UniswapPositionCard() {
                     Loading Uniswap v4 positions...
                   </td>
                 </tr>
+              ) : isRateLimited ? (
+                <tr>
+                  <td
+                    colSpan={5}
+                    className="px-6 py-6 text-center text-xs text-amber-400"
+                  >
+                    RPC rate limit hit while loading Uniswap positions.
+                    We&#39;re retrying in the background. If this keeps
+                    happening, please refresh the page or try again in a few
+                    seconds.
+                  </td>
+                </tr>
               ) : isError ? (
                 <tr>
                   <td
                     colSpan={5}
                     className="px-6 py-6 text-center text-xs text-red-500"
                   >
-                    Failed to load Uniswap positions. Check console / RPC.
+                    Failed to load Uniswap positions. Check your RPC settings or
+                    try again.
                   </td>
                 </tr>
               ) : rows.length === 0 ? (

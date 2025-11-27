@@ -14,19 +14,24 @@ import { privateKeyToAccount } from "viem/accounts";
 import { erc20Abi } from "@/abi/erc20Abi";
 import { miniV4SwapRouterAbi } from "@/abi/MiniV4SwapRouterAbi";
 
-// ✅ 서버용 ENV
-const rpcUrl = process.env.RPC_URL!;
-const demoPk = process.env.DEMO_TRADER_PRIVATE_KEY!;
-
+// -------------------------------
+// 1) 공용(프론트+서버) 주소 계열 env
+//    → NEXT_PUBLIC_* 만 사용 (이미 .env.production 에 있음)
+// -------------------------------
 const MINI_SWAP_ROUTER_ADDRESS = process.env
-  .MINI_SWAP_ROUTER_ADDRESS as `0x${string}`;
-const AAVE_UNDERLYING = process.env.AAVE_UNDERLYING_SEPOLIA as `0x${string}`;
-const LINK_UNDERLYING = process.env.LINK_UNDERLYING_SEPOLIA as `0x${string}`;
+  .NEXT_PUBLIC_MINI_SWAP_ROUTER_ADDRESS as `0x${string}`;
 
-// ✅ 훅 주소 (.env 에서 HOOK 사용)
-const HOOK_ADDRESS = process.env.HOOK as `0x${string}`;
+const AAVE_UNDERLYING = process.env
+  .NEXT_PUBLIC_AAVE_UNDERLYING_SEPOLIA as `0x${string}`;
 
-// 🔍 Hook 이벤트용 mini ABI (SwapPriceLogged 만 정의)
+const LINK_UNDERLYING = process.env
+  .NEXT_PUBLIC_LINK_UNDERLYING_SEPOLIA as `0x${string}`;
+
+const HOOK_ADDRESS = process.env.NEXT_PUBLIC_HOOK as `0x${string}`;
+
+// -------------------------------
+// 2) Hook 이벤트 mini ABI
+// -------------------------------
 const hookAbi = [
   {
     type: "event",
@@ -62,43 +67,78 @@ export type HookSwapEvent = {
   txHash: `0x${string}`;
   poolId: `0x${string}`;
   tick: number;
-  sqrtPriceX96: string; // <- JSON 직렬화 위해 string
-  timestamp: string; // <- block.timestamp (string)
+  sqrtPriceX96: string; // JSON 직렬화 위해 string
+  timestamp: string; // block.timestamp (string)
 };
 
-// trader 계정 & 클라이언트
-const account = privateKeyToAccount(demoPk as `0x${string}`);
+// -------------------------------
+// 3) 서버 전용 설정/클라이언트 헬퍼
+//    → 여기서만 DEMO_TRADER_PRIVATE_KEY / RPC_URL 읽음
+// -------------------------------
+// -------------------------------
+// 3) 서버 전용 설정/클라이언트 헬퍼
+//    → 여기서만 DEMO_TRADER_PRIVATE_KEY / ALCHEMY_RPC_URL 읽음
+// -------------------------------
+function getServerClients() {
+  // 1순위: Alchemy (백엔드 전용)
+  // 2순위: RPC_URL (로컬에서 Infura 등)
+  // 3순위: NEXT_PUBLIC_RPC_URL (혹시라도 세팅만 돼 있다면)
+  const rpcUrl =
+    process.env.ALCHEMY_RPC_URL ||
+    process.env.RPC_URL ||
+    process.env.NEXT_PUBLIC_RPC_URL ||
+    undefined;
 
-const publicClient = createPublicClient({
-  chain: sepolia,
-  transport: http(rpcUrl),
-});
+  const demoPk = process.env.DEMO_TRADER_PRIVATE_KEY;
+  console.log("[demoTrader] rpcUrl ", rpcUrl);
 
-const walletClient = createWalletClient({
-  chain: sepolia,
-  transport: http(rpcUrl),
-  account,
-});
+  if (!rpcUrl) {
+    throw new Error(
+      "ALCHEMY_RPC_URL (or RPC_URL / NEXT_PUBLIC_RPC_URL) env not set on server for demo trader"
+    );
+  }
+  if (!demoPk) {
+    throw new Error("DEMO_TRADER_PRIVATE_KEY env not set on server");
+  }
 
-// demo trade 한번 실행하는 함수
+  const account = privateKeyToAccount(demoPk as `0x${string}`);
+
+  const publicClient = createPublicClient({
+    chain: sepolia,
+    transport: http(rpcUrl),
+  });
+
+  const walletClient = createWalletClient({
+    chain: sepolia,
+    transport: http(rpcUrl),
+    account,
+  });
+
+  return { publicClient, walletClient, account };
+}
+
+// -------------------------------
+// 4) demo trade 한번 실행하는 메인 함수
+// -------------------------------
 export async function runDemoTrade() {
+  // 주소 계열 env 체크 (NEXT_PUBLIC_* 이라 빌드 타임에도 존재해야 함)
   if (
-    !rpcUrl ||
-    !demoPk ||
     !MINI_SWAP_ROUTER_ADDRESS ||
     !AAVE_UNDERLYING ||
     !LINK_UNDERLYING ||
     !HOOK_ADDRESS
   ) {
-    throw new Error("Missing server-side env vars for demo trader");
+    throw new Error("Missing NEXT_PUBLIC_* env vars for demo trader");
   }
+
+  // 서버 전용 클라이언트 준비 (여기서만 private key / RPC 읽음)
+  const { publicClient, walletClient, account } = getServerClients();
 
   const blockNumber = await publicClient.getBlockNumber();
   console.log("[demoTrader] current block :", blockNumber.toString());
   console.log("[demoTrader] trader       :", account.address);
   console.log("[demoTrader] hook         :", HOOK_ADDRESS);
 
-  // 🔧 Foundry에서 하던 것처럼: 100 토큰씩 N번 스왑
   const swapCount = 2;
   const amountPerSwap = parseUnits("100", 18); // AAVE/LINK 둘 다 18dec 가정
 
@@ -193,7 +233,7 @@ export async function runDemoTrade() {
     }
   }
 
-  // ✅ 이제 이 객체는 BigInt가 없어서 NextResponse.json에 바로 넣어도 됨
+  // ✅ BigInt 없이 JSON 직렬화 가능한 응답
   return {
     blockNumber: blockNumber.toString(),
     swaps: swapCount,

@@ -1,0 +1,11 @@
+# 기본적으로 올릴 필요 없는 것들
+node_modules
+.next
+npm-debug.log
+.git
+.gitignore
+
+# env 파일들: 기본은 다 무시
+.env*
+# 단 .env.production 은 다시 허용
+!.env.production

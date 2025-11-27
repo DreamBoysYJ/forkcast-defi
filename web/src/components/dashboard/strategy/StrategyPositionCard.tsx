@@ -41,7 +41,7 @@ function getTokenMeta(addr: `0x${string}`) {
 
 export function StrategyPositionCard() {
   // 1) 온체인 통합 뷰 훅
-  const { view, isLoading, isError } = useStrategyPositionView();
+  const { view, isLoading, isError, isRateLimited } = useStrategyPositionView();
 
   // 2) Close preview 모달 상태
   const [isCloseModalOpen, setIsCloseModalOpen] = useState(false);
@@ -60,7 +60,7 @@ export function StrategyPositionCard() {
   let rowData: StrategyPositionRowData | null = null;
 
   if (view && view.tokenId !== 0n) {
-    // 🔥 "닫힌" 포지션은 아예 없는 것으로 취급
+    // "닫힌" 포지션은 아예 없는 것으로 취급
     const isEffectivelyClosed =
       !view.isOpen ||
       (view.totalCollateralUsd === 0 && view.totalDebtUsd === 0);
@@ -153,9 +153,16 @@ export function StrategyPositionCard() {
             <div className="py-8 text-center text-sm text-slate-500">
               Loading strategy position...
             </div>
+          ) : isRateLimited ? (
+            <div className="py-8 text-center text-sm text-amber-400">
+              RPC rate limit hit while loading your strategy position.
+              We&apos;re retrying in the background. If this keeps happening,
+              please refresh the page or try again in a few seconds.
+            </div>
           ) : isError ? (
             <div className="py-8 text-center text-sm text-red-400">
-              Failed to load strategy position. Check RPC / wallet connection.
+              Failed to load strategy position. Check your RPC settings or
+              wallet connection.
             </div>
           ) : !rowData ? (
             <div className="py-8 text-center text-sm text-slate-500">
