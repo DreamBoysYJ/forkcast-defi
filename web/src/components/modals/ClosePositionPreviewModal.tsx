@@ -3,10 +3,13 @@
 
 import { useEffect, useState } from "react";
 import { useAccount, useConfig, useWriteContract } from "wagmi";
-import { readContract } from "@wagmi/core";
-import { parseUnits } from "viem";
+import { readContract, waitForTransactionReceipt } from "@wagmi/core";
+import { parseUnits, decodeEventLog } from "viem";
 import { strategyRouterContract } from "@/lib/contracts";
 import { useRouter } from "next/navigation";
+
+import { useHookEventStore, UiHookEvent } from "@/store/useHookEventStore";
+import { hookAbi } from "@/abi/hookAbi";
 
 // 데모용: 우리가 쓰는 토큰 메타 (AAVE / LINK)
 const TOKEN_META: Record<
@@ -88,7 +91,7 @@ type ClosePositionPreviewModalProps = {
   isOpen: boolean;
   onClose: () => void;
   tokenId: number;
-  totalDebtUsdFromCard: number; // ★ 추가
+  totalDebtUsdFromCard: number; // 카드에서 넘어온 USD 값
 };
 
 // 주소 줄여서 보여주기
@@ -106,6 +109,9 @@ function toTokenAmount(raw: bigint, decimals: number): number {
   return Number(raw) / 10 ** decimals;
 }
 
+// ✅ 훅 주소 (클라에서 보는 용도)
+const HOOK_ADDRESS = process.env.NEXT_PUBLIC_HOOK as `0x${string}` | undefined;
+
 export function ClosePositionPreviewModal(
   props: ClosePositionPreviewModalProps
 ) {
@@ -115,6 +121,8 @@ export function ClosePositionPreviewModal(
   const { address: wallet } = useAccount();
   const wagmiConfig = useConfig();
   const { writeContractAsync } = useWriteContract();
+
+  const addManyHookEvents = useHookEventStore((s) => s.addMany);
 
   const [preview, setPreview] = useState<ClosePreviewData | null>(null);
   const [walletBorrowBalance, setWalletBorrowBalance] = useState<number>(0);
@@ -212,7 +220,6 @@ export function ClosePositionPreviewModal(
           borrowMeta.decimals
         );
 
-        // USD 는 일단 0으로 두고, 나중에 Aave price oracle 붙이면 됨.
         // ❶ borrow 토큰 1개당 USD 가격 추정
         const borrowPriceUsd =
           totalDebtToken > 0 ? totalDebtUsdFromCard / totalDebtToken : 0;
@@ -328,6 +335,12 @@ export function ClosePositionPreviewModal(
     isPrimaryDisabled = isRunningTx;
   }
 
+  // 🔹 "Use max" 버튼에서 쓰는 핸들러 (다시 추가)
+  const handleUseMax = () => {
+    if (!preview) return;
+    setExtraAmountInput(preview.maxExtraFromUser.toString());
+  };
+
   // Approve -> closePosition 플로우
   const handleClickPrimary = async () => {
     if (!preview) return;
@@ -384,11 +397,71 @@ export function ClosePositionPreviewModal(
         });
 
         console.log("[ClosePreview] closePosition tx hash:", hash);
-        onClose();
-        router.refresh();
 
-        // 실제 값은 이벤트/리시트에서 나중에 뽑고,
-        // 지금은 preview 데이터를 기반으로 "Estimated result" 표시
+        // 🔥 여기서 tx 확정까지 기다리고, 훅 이벤트 파싱
+        const receipt = await waitForTransactionReceipt(wagmiConfig, {
+          hash,
+        });
+
+        console.log(
+          "[ClosePreview] all log addresses",
+          receipt.logs.map((l) => l.address)
+        );
+        console.log("[ClosePreview] HOOK_ADDRESS", HOOK_ADDRESS);
+
+        const logsForHook = receipt.logs.filter(
+          (log) =>
+            HOOK_ADDRESS &&
+            log.address.toLowerCase() === HOOK_ADDRESS.toLowerCase()
+        );
+
+        console.log("[ClosePreview] logsForHook.length", logsForHook.length);
+
+        const newEvents: UiHookEvent[] = [];
+
+        logsForHook.forEach((log, index) => {
+          try {
+            const decoded = decodeEventLog({
+              abi: hookAbi,
+              data: log.data,
+              topics: log.topics,
+            });
+
+            if (decoded.eventName !== "SwapPriceLogged") return;
+
+            const { poolId, tick, sqrtPriceX96, timestamp } =
+              decoded.args as any;
+            const tsSec = Number(timestamp);
+            const tsMs = Number.isFinite(tsSec) ? tsSec * 1000 : Date.now();
+
+            const evt: UiHookEvent = {
+              id: `${hash}-${index}`,
+              source: "USER_TX",
+              txHash: hash,
+              poolId: poolId as `0x${string}`,
+              tick: Number(tick),
+              sqrtPriceX96: BigInt(sqrtPriceX96).toString(),
+              timestampMs: tsMs,
+            };
+
+            console.log("[ClosePreview] hook event:", evt);
+            newEvents.push(evt);
+          } catch (e) {
+            console.error(
+              "[ClosePreview] decodeEventLog failed for tx",
+              hash,
+              e
+            );
+          }
+        });
+
+        if (newEvents.length > 0) {
+          addManyHookEvents(newEvents);
+        }
+
+        alert("CLOSE POSITION COMPLETED!");
+        onClose();
+        router.refresh(); // 필요 없으면 나중에 빼도 됨
         setMode("done");
       } catch (e) {
         console.error("[ClosePreview] closePosition failed", e);
@@ -398,11 +471,8 @@ export function ClosePositionPreviewModal(
     }
   };
 
-  const handleUseMax = () => {
-    if (!preview) return;
-    setExtraAmountInput(preview.maxExtraFromUser.toString());
-  };
-
+  // ⬇️ 여기부터 JSX 부분은 너가 원래 쓰던 거 그대로 두면 됨
+  //   - extraAmountInput / handleUseMax / handleClickPrimary 다 그대로 연결
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/70">
       <div className="w-full max-w-4xl rounded-2xl border border-slate-800 bg-slate-900/95 p-6 shadow-xl">

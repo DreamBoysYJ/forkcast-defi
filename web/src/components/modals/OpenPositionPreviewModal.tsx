@@ -7,8 +7,11 @@ import {
   useReadContract,
   useWriteContract,
 } from "wagmi";
-import { erc20Abi, parseUnits } from "viem";
+import { erc20Abi, parseUnits, decodeEventLog } from "viem";
 import { strategyRouterContract, strategyLensContract } from "@/lib/contracts";
+import { useHookEventStore, UiHookEvent } from "@/store/useHookEventStore";
+import { hookAbi } from "@/abi/hookAbi";
+
 import { useRouter } from "next/navigation";
 
 export type AssetOption = {
@@ -28,10 +31,13 @@ type Phase = "approve" | "open";
 
 const HF_1E18 = 10n ** 18n;
 
+const HOOK_ADDRESS = process.env.NEXT_PUBLIC_HOOK as `0x${string}`;
+
 export function OpenPositionPreviewModal(props: OpenPositionPreviewModalProps) {
   const { isOpen, onClose, supplyOptions, borrowOptions, initialSupplySymbol } =
     props;
   const router = useRouter(); // 👈 추가
+  const addManyHookEvents = useHookEventStore((s) => s.addMany);
 
   // ---- 1) Supply: AAVE만, Borrow: LINK만 사용하도록 필터 ----
   const supplyList =
@@ -289,9 +295,59 @@ export function OpenPositionPreviewModal(props: OpenPositionPreviewModalProps) {
 
         console.log("openPosition tx hash", txHash);
 
-        // 필요하면 여기서도 waitForTransactionReceipt 가능
-        // await publicClient?.waitForTransactionReceipt({ hash: txHash });
+        const receipt = await publicClient?.waitForTransactionReceipt({
+          hash: txHash,
+        });
 
+        console.log(
+          "[openPosition] all log addresses",
+          receipt?.logs.map((l) => l.address)
+        );
+        console.log("[openPosition] HOOK_ADDRESS", HOOK_ADDRESS);
+
+        const logsForHook = receipt?.logs.filter(
+          (log) =>
+            HOOK_ADDRESS &&
+            log.address.toLowerCase() === HOOK_ADDRESS.toLowerCase()
+        );
+
+        console.log("[openPosition] logsForHook.length", logsForHook?.length);
+
+        const newEvents: UiHookEvent[] = [];
+        logsForHook?.forEach((log, index) => {
+          try {
+            const decoded = decodeEventLog({
+              abi: hookAbi,
+              data: log.data,
+              topics: log.topics,
+            });
+
+            if (decoded.eventName != "SwapPriceLogged") return;
+
+            const { poolId, tick, sqrtPriceX96, timestamp } =
+              decoded.args as any;
+            const tsSec = Number(timestamp);
+            const tsMs = Number.isFinite(tsSec) ? tsSec * 1000 : Date.now();
+            const evt: UiHookEvent = {
+              id: `${txHash}-${index}`,
+              source: "USER_TX",
+              txHash: txHash,
+              poolId: poolId as `0x${string}`,
+              tick: Number(tick),
+              sqrtPriceX96: BigInt(sqrtPriceX96).toString(),
+              timestampMs: tsMs,
+            };
+            console.log("[openPosition] hook event:", evt);
+            newEvents.push(evt);
+          } catch (e) {
+            console.error("[openPosition] decodeEventLog failed", e);
+          }
+        });
+
+        if (newEvents.length > 0) {
+          addManyHookEvents(newEvents);
+        }
+        alert("OPEN POSITION COMPLETED!!!");
         onClose();
         router.refresh();
       } catch (err) {

@@ -16,6 +16,7 @@ import {
 import { DemoTraderModal } from "@/components/modals/DemoTraderModal";
 
 import { useState } from "react";
+import { HookEventSection } from "@/components/dashboard/HookEventSection";
 
 export default function Page() {
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
@@ -64,6 +65,7 @@ export default function Page() {
         </div>
 
         {/* 전략 통합 카드 (온체인 데이터로 렌더링) */}
+        <HookEventSection />
         <section className="mt-8">
           <StrategyPositionCard />
         </section>

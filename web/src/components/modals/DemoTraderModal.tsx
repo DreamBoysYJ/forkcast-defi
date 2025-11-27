@@ -1,10 +1,40 @@
 "use client";
 
+import { useHookEventStore } from "@/store/useHookEventStore";
 import { useState } from "react";
 
 type DemoTraderModalProps = {
   isOpen: boolean;
   onClose: () => void;
+};
+
+// ✅ 백엔드 /api/demo-trader/run 응답 타입
+type DemoTraderApiResponse = {
+  ok: boolean;
+  result: {
+    blockNumber: string;
+    swaps: number;
+    txHashes: `0x${string}`[];
+    hookEvents: {
+      txHash: `0x${string}`;
+      poolId: `0x${string}`;
+      tick: number;
+      sqrtPriceX96: string; // string으로 온다 (BigInt toString)
+      timestamp: string; // block.timestamp (seconds, string)
+    }[];
+  };
+};
+
+// ✅ 우리가 zustand에 넣을려고 하는 UI용 이벤트 타입 (예시)
+type UiHookEvent = {
+  id: string;
+  source: "DEMO_TRADER";
+  txHash: `0x${string}`;
+  poolId: `0x${string}`;
+  tick: number;
+  sqrtPriceX96: string;
+  // 프론트에서 쓰기 편하게 ms 단위로 바꾼 시간
+  timestampMs: number;
 };
 
 export function DemoTraderModal({ isOpen, onClose }: DemoTraderModalProps) {
@@ -25,20 +55,42 @@ export function DemoTraderModal({ isOpen, onClose }: DemoTraderModalProps) {
         throw new Error(text || "Request failed");
       }
 
-      // 굳이 안 써도 되지만, 혹시 백엔드에서 message 내려줄 수도 있으니 남겨둠
-      const data = (await res.json().catch(() => ({}))) as {
-        message?: string;
-      };
+      const data = (await res.json()) as DemoTraderApiResponse;
+
+      console.log("[demo-trader] raw response", data);
+
+      const { result } = data;
+      const { hookEvents } = result;
+
+      // ✅ zustand에 넣을 용도로 변환 (source 붙이고, timestamp → ms로 변환)
+      const uiEvents: UiHookEvent[] = hookEvents.map((evt, index) => {
+        const tsSec = Number(evt.timestamp); // block.timestamp (seconds)
+        const tsMs = Number.isFinite(tsSec) ? tsSec * 1000 : Date.now();
+
+        return {
+          id: `${evt.txHash}-${index}`, // 나중에 nanoid 써도 되고
+          source: "DEMO_TRADER",
+          txHash: evt.txHash,
+          poolId: evt.poolId,
+          tick: evt.tick,
+          sqrtPriceX96: evt.sqrtPriceX96,
+          timestampMs: tsMs,
+        };
+      });
+
+      console.log("[demo-trader] uiEvents for zustand", uiEvents);
+
+      // 🔮 나중에 이렇게 쓸 예정:
+      useHookEventStore.getState().addMany(uiEvents);
 
       const msg =
-        data.message ??
-        "Demo trader finished. All demo swaps have been executed.\nCheck your Uniswap LP card to see updated fees.";
+        `Demo trader finished.\n` +
+        `Swaps: ${result.swaps}, Hook events: ${uiEvents.length}`;
 
-      // ✅ 여기서 유저가 alert 닫을 때까지 기다렸다가
       alert(msg);
-      // ✅ 그 다음에 모달 닫기
       onClose();
     } catch (err: any) {
+      console.error("[demo-trader] front error", err);
       const msg =
         err?.message ??
         "Failed to run demo trader. Please check server logs or try again.";
