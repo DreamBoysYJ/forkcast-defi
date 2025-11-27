@@ -17,15 +17,22 @@ function HookEventRow({ event }: { event: UiHookEvent }) {
   const price = sqrtPriceX96ToPrice(event.sqrtPriceX96);
   const dateLabel = formatTimestamp(event.timestampMs);
 
-  const sourceLabel =
-    event.source === "DEMO_TRADER" ? "Demo trader swap" : "Your swap";
+  const isUserSwap = event.source === "USER_TX";
+
+  const sourceLabel = isUserSwap ? "Your swap" : "Demo trader swap";
+
+  const badgeClass = isUserSwap
+    ? "bg-indigo-500/15 text-indigo-200 border-indigo-500/40"
+    : "bg-emerald-500/15 text-emerald-200 border-emerald-500/40";
 
   return (
     <div className="flex items-start justify-between px-6 py-3 text-[11px] text-slate-200">
       {/* Left */}
       <div className="flex flex-col gap-1">
         <div className="flex items-center gap-2">
-          <span className="rounded-full bg-indigo-500/10 px-2 py-0.5 text-[10px] font-medium text-indigo-300">
+          <span
+            className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[10px] font-medium ${badgeClass}`}
+          >
             {sourceLabel}
           </span>
           <span className="text-[10px] text-slate-400">

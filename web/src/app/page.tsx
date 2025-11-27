@@ -48,9 +48,9 @@ export default function Page() {
     <ClientOnly>
       {" "}
       <main className="min-h-screen bg-slate-900 text-white p-6">
-        <h1 className="text-xl font-semibold">Forkcast Demo</h1>
+        <h1 className="text-xl font-semibold">Forkcast DeFi</h1>
         <p className="text-sm text-gray-500">
-          Aave ↔ Uniswap v4 one-shot + demo volume
+          Preview & run a one-shot Aave → Uniswap v4 LP strategy
         </p>
 
         {/* 상단: 지갑 연결 + 데모 트레이더 버튼 */}
