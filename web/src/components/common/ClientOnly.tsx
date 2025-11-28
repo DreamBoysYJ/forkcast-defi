@@ -9,9 +9,9 @@ export function ClientOnly({ children }: { children: ReactNode }) {
     setMounted(true);
   }, []);
 
-  // 서버 렌더 + 첫 클라이언트 렌더에서는 null (아무 것도 안 그림)
+  // Server Render + First Client Render -> Null
   if (!mounted) return null;
 
-  // 그 다음부터 실제 UI 렌더
+  // After then Render Real UI
   return <>{children}</>;
 }

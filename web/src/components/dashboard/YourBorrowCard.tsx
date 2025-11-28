@@ -37,7 +37,7 @@ export function YourBorrowCard() {
     <section className="mt-8 flex justify-center">
       <div className="w-full max-w-5xl rounded-2xl border border-slate-800/40 bg-slate-900/40 p-3">
         <div className="overflow-hidden rounded-xl bg-white shadow-sm">
-          {/* 카드 헤더 */}
+          {/* Card header */}
           <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
             <h2 className="text-sm font-semibold text-slate-900">
               Your borrows
@@ -47,7 +47,7 @@ export function YourBorrowCard() {
             </span>
           </div>
 
-          {/* 리스트 테이블 */}
+          {/* List table */}
           <div className="overflow-x-auto">
             <table className="min-w-full border-collapse">
               <thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-400">

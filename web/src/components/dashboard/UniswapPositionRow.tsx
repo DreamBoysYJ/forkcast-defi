@@ -9,8 +9,8 @@ export type UniPositionRowData = {
   token1IconUrl: string;
   rangeLabel: string;
   inRange: boolean;
-  amount0NowLabel: string; // 예: "AAVE 70.83"
-  amount1NowLabel: string; // 예: "LINK 12.34"
+  amount0NowLabel: string; // ex: "AAVE 70.83"
+  amount1NowLabel: string; // ex: "LINK 12.34"
 };
 
 type Props = {

@@ -12,12 +12,45 @@ import {TickMath} from "v4-core/src/libraries/TickMath.sol";
 
 import {StrategyRouter} from "../src/router/StrategyRouter.sol";
 
+/// @title InitStrategyRouterV4PoolConfig
+/// @notice One–time script to set Uniswap v4 pool configuration on StrategyRouter.
+/// @dev
+/// This script:
+/// - Rebuilds the AAVE/LINK + Hook PoolKey (must match the pool used on-chain).
+/// - Derives the full-range tick band based on v4’s MIN_TICK / MAX_TICK.
+/// - Calls `StrategyRouter.setUniswapV4PoolConfig(key, lower, upper)` as the admin.
+///
+/// Env requirements:
+/// - DEPLOYER_PRIVATE_KEY        : admin EOA for StrategyRouter
+/// - STRATEGY_ROUTER             : deployed StrategyRouter address
+/// - AAVE_UNDERLYING_SEPOLIA     : AAVE ERC20 address on Sepolia
+/// - LINK_UNDERLYING_SEPOLIA     : LINK ERC20 address on Sepolia
+/// - HOOK                        : deployed SwapPriceLoggerHook (or compatible) address
+///
+/// Why separate from deployment?
+/// - Core contracts can be deployed once (router, lens, factory, etc.).
+/// - v4 pool configuration (tokens, hook, tick range) may be iterated on
+///   or re-initialized without redeploying the entire router.
+///
+/// Typical usage:
+/// - After the v4 pool + hook are deployed and liquidity is bootstrapped:
+///     forge script script/InitStrategyRouterV4PoolConfig.s.sol \
+///       --rpc-url sepolia \
+///       --broadcast
+
 contract InitStrategyRouterV4PoolConfig is Script {
     using PoolIdLibrary for PoolKey;
 
+    // Tokens + hook for the AAVE/LINK pool
     address public AAVE;
     address public LINK;
     IHooks public hook;
+
+    /// @dev Build the canonical PoolKey for the AAVE/LINK hooked pool.
+    /// @notice
+    /// - Sorts AAVE/LINK by address to determine currency0/currency1.
+    /// - Uses fee = 3000 (0.3%) and tickSpacing = 10.
+    /// - Attaches the SwapPriceLoggerHook (or compatible) as the hooks contract.
 
     function _buildAaveLinkPoolKey()
         internal
@@ -47,7 +80,11 @@ contract InitStrategyRouterV4PoolConfig is Script {
         });
     }
 
+    /// @notice Script entrypoint: wires the v4 pool config into StrategyRouter.
     function run() external {
+        // ---------------------------------------------------------------------
+        // 1. Load env + resolve addresses
+        // ---------------------------------------------------------------------
         uint256 pk = vm.envUint("DEPLOYER_PRIVATE_KEY");
 
         address routerAddr = vm.envAddress("STRATEGY_ROUTER");
@@ -63,20 +100,33 @@ contract InitStrategyRouterV4PoolConfig is Script {
         console2.log("LINK           :", LINK);
         console2.log("Hook           :", hookAddr);
 
+        // ---------------------------------------------------------------------
+        // 2. Build PoolKey + derive full-range ticks
+        // ---------------------------------------------------------------------
         PoolKey memory key = _buildAaveLinkPoolKey();
 
-        // 풀레인지 기본값
+        // Full-range ticks based on v4 TickMath + pool tickSpacing
         int24 tickSpacing = key.tickSpacing; // = 10
         int24 lower = (TickMath.MIN_TICK / tickSpacing) * tickSpacing;
         int24 upper = (TickMath.MAX_TICK / tickSpacing) * tickSpacing;
 
         StrategyRouter router = StrategyRouter(routerAddr);
 
+        // ---------------------------------------------------------------------
+        // 3. Configure StrategyRouter with the v4 pool settings
+        // ---------------------------------------------------------------------
         vm.startBroadcast(pk);
+
+        // Tell the router which v4 pool (PoolKey + tick range) it should use
+        // when entering LP positions. This is typically an admin-only,
+        // rarely-changed operation.
         router.setUniswapV4PoolConfig(key, lower, upper);
         vm.stopBroadcast();
 
         PoolId poolId = key.toId();
+        // ---------------------------------------------------------------------
+        // 4. Log final pool config for verification
+        // ---------------------------------------------------------------------
         console2.log("Set pool config:");
         console2.log("  poolId      :");
         console2.logBytes32(PoolId.unwrap(poolId));

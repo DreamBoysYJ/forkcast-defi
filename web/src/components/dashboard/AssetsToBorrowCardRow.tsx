@@ -17,7 +17,7 @@ export function AssetsToBorrowCardRow({ asset }: Props) {
 
   return (
     <tr className="fc-row">
-      {/* 1) Asset (아이콘 + 심볼) */}
+      {/* 1) Asset (icon + symbol) */}
       <td className="fc-cell fc-cell-left">
         <div className="fc-asset-main">
           {iconUrl ? (
@@ -29,7 +29,7 @@ export function AssetsToBorrowCardRow({ asset }: Props) {
         </div>
       </td>
 
-      {/* 2) Available (토큰 양 + USD) */}
+      {/* 2) Available (tokenAmount + USD)*/}
       <td className="fc-cell fc-cell-right">
         <div className="font-medium text-slate-900 leading-tight">
           ✓{/* {available.toFixed(2)} */}

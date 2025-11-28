@@ -11,7 +11,7 @@ import { useRouter } from "next/navigation";
 import { useHookEventStore, UiHookEvent } from "@/store/useHookEventStore";
 import { hookAbi } from "@/abi/hookAbi";
 
-// 데모용: 우리가 쓰는 토큰 메타 (AAVE / LINK)
+// FOR DEMO (V1) : Only Use AAVE/LINK
 const TOKEN_META: Record<
   string,
   { symbol: string; icon: string; decimals: number }
@@ -30,7 +30,7 @@ const TOKEN_META: Record<
   },
 };
 
-// 최소 ERC20 ABI (approve / balanceOf / allowance)
+// ERC20 ABI (approve / balanceOf / allowance)
 const erc20Abi = [
   {
     type: "function",
@@ -63,7 +63,7 @@ const erc20Abi = [
 
 export type ClosePreviewData = {
   tokenId: number;
-  // 전략 구성
+  // strategyPosition struct
   supplySymbol: string;
   borrowSymbol: string;
   supplyIconUrl: string;
@@ -72,7 +72,7 @@ export type ClosePreviewData = {
   borrowTokenAddress: `0x${string}`;
   borrowDecimals: number;
 
-  // LP에서 빠져나오는 토큰들
+  // when remove LP
   token0Symbol: string;
   token1Symbol: string;
   amount0FromLp: number;

@@ -21,10 +21,10 @@ export function ModalBase({
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm">
-      {/* 클릭하면 닫히는 오버레이 */}
+      {/* Click - Close Overlay */}
       <div className="absolute inset-0" onClick={onClose} aria-hidden="true" />
 
-      {/* 실제 모달 박스 */}
+      {/* Modal Box */}
       <div className="relative z-50 w-full max-w-xl rounded-2xl border border-slate-800 bg-slate-900/95 p-6 shadow-2xl">
         {(title || subtitle) && (
           <div className="mb-4 flex items-start justify-between gap-4">

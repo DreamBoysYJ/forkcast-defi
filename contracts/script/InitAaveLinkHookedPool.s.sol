@@ -22,6 +22,29 @@ import {Actions} from "v4-periphery/src/libraries/Actions.sol";
 // ERC20
 import {IERC20} from "../src/interfaces/IERC20.sol";
 
+/// @title InitAaveLinkHookedPool
+/// @notice One–off script to bootstrap an AAVE/LINK Uniswap v4 pool that is
+///         wired to your custom hook, and to seed it with a full-range LP
+///         position using the deployer’s token balances.
+/// @dev
+/// Env requirements:
+/// - DEPLOYER_PRIVATE_KEY        : EOA that owns the initial LP NFT
+/// - POOL_MANAGER                : Uniswap v4 PoolManager
+/// - POSITION_MANAGER            : Uniswap v4 PositionManager
+/// - PERMIT2                     : Permit2 contract used by PositionManager
+/// - AAVE_UNDERLYING_SEPOLIA     : AAVE ERC20 address on Sepolia
+/// - LINK_UNDERLYING_SEPOLIA     : LINK ERC20 address on Sepolia
+/// - HOOK                        : deployed hook address (e.g. SwapPriceLoggerHook)
+///
+/// Typical flow:
+/// 1) Deploy HookFactory + hook (see other scripts).
+/// 2) Initialize the AAVE/LINK pool once (either off-chain or by calling
+///    `_initPool` from a separate script).
+/// 3) Run this script to:
+///    - build the PoolKey for (AAVE, LINK, fee=3000, spacing=10, hooks=HOOK)
+///    - approve Permit2 + PositionManager
+///    - mint a full-range LP position using *all* AAVE/LINK held by `provider`.
+
 contract InitAaveLinkHookedPool is Script {
     using PoolIdLibrary for PoolKey;
 
@@ -33,7 +56,8 @@ contract InitAaveLinkHookedPool is Script {
     address public LINK;
     IHooks public hook;
 
-    /// @dev AAVE/LINK 페어에 대한 PoolKey 생성 (fee=3000, tickSpacing = 10, hooks = Hook)
+    /// @dev Build PoolKey for the AAVE/LINK pair (fee=3000, tickSpacing=10, hooks=hook).
+    ///      Token ordering follows Uniswap convention: lower address becomes currency0.
     function _buildAaveLinkPoolKey()
         internal
         view
@@ -42,7 +66,7 @@ contract InitAaveLinkHookedPool is Script {
         address token0;
         address token1;
 
-        // 토큰 주소 정렬 (낮은 주소가 currency0)
+        // Sort token addresses (lower address is currency0).
         if (AAVE < LINK) {
             token0 = AAVE;
             token1 = LINK;
@@ -63,7 +87,9 @@ contract InitAaveLinkHookedPool is Script {
         });
     }
 
-    /// @dev AAVE/LINK + Hook 풀을 1:1 초기가로 init
+    /// @dev Initialize the hooked AAVE/LINK pool at a 1:1 price.
+    /// @notice Not called in `run()` at the moment. Use from a dedicated
+    ///         “init-only” script if you still need an on-chain initializer.
     function _initPool() internal returns (PoolKey memory key, int24 initTick) {
         key = _buildAaveLinkPoolKey();
 
@@ -83,7 +109,10 @@ contract InitAaveLinkHookedPool is Script {
         // console2.log("PoolId:", PoolId.unwrap(poolId));
     }
 
-    /// @dev 초기 유동성 공급 함수 : provider가 들고 있는 AAVE/LINK 전부 사용해 풀레인지 포지션 민트
+    /// @dev Provide bootstrap liquidity:
+    ///      - Mint a full-range position
+    ///      - Use the provider's entire AAVE/LINK balances as max amounts
+    ///      - Set liquidity ~= min(bal0, bal1) (clamped to uint128)
     function _bootstrapLiquidity(
         PoolKey memory key,
         address provider
@@ -116,7 +145,7 @@ contract InitAaveLinkHookedPool is Script {
         int24 upper = (TickMath.MAX_TICK / spacing) * spacing;
 
         // liquidity / amountMax
-        // amountMax는 "잔고 거의 전체", liquidity는 min(bal0, bal1) 기준으로 잡음
+        // amountMax = balanceOf(provider), liquidity -  min(bal0, bal1)
         uint128 amount0Max = bal0Before > type(uint128).max
             ? type(uint128).max
             : uint128(bal0Before);
@@ -147,7 +176,7 @@ contract InitAaveLinkHookedPool is Script {
             liquidity,
             amount0Max,
             amount1Max,
-            provider, // LP NFT 받는 사람: provider(관리자)
+            provider, // LP NFT owner: provider(관리자)
             bytes("") // hookData
         );
         params[1] = abi.encode(key.currency0, key.currency1);
@@ -166,6 +195,8 @@ contract InitAaveLinkHookedPool is Script {
         spent1 = bal1Before - bal1After;
     }
 
+    /// @notice Script entrypoint. Assumes the AAVE/LINK pool is already
+    ///         initialized and the hook is registered for that pool key.
     function run() external {
         // 1) load env variables
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
@@ -175,7 +206,7 @@ contract InitAaveLinkHookedPool is Script {
         address permit2Addr = vm.envAddress("PERMIT2");
         address poolManagerAddr = vm.envAddress("POOL_MANAGER");
 
-        // Sepolia용 토큰 주소 (.env 에 이미 있을 거라고 가정)
+        // Sepolia Token Address (.env)
         AAVE = vm.envAddress("AAVE_UNDERLYING_SEPOLIA");
         LINK = vm.envAddress("LINK_UNDERLYING_SEPOLIA");
         address hookAddr = vm.envAddress("HOOK");
@@ -190,18 +221,6 @@ contract InitAaveLinkHookedPool is Script {
         console2.log("AAVE address :", AAVE);
         console2.log("LINK address :", LINK);
         console2.log("Hook address :", hookAddr);
-
-        // 2) Pool init
-        // vm.startBroadcast(deployerPrivateKey);
-        // (PoolKey memory key, int24 initTick) = _initPool();
-        // vm.stopBroadcast();
-        // console2.log("=== Pool initialized ===");
-        // console2.log("currency0:", Currency.unwrap(key.currency0));
-        // console2.log("currency1:", Currency.unwrap(key.currency1));
-        // console2.log("fee      :", key.fee);
-        // console2.log("tickSpacing:", key.tickSpacing);
-        // console2.log("initTick :", initTick);
-        // console2.log("hooks    :", address(key.hooks));
 
         PoolKey memory key = _buildAaveLinkPoolKey();
         vm.startBroadcast(deployerPrivateKey);

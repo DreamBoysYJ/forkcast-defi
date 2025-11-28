@@ -9,7 +9,7 @@ import {
 import { ClosePositionPreviewModal } from "@/components/modals/ClosePositionPreviewModal";
 import { useStrategyPositionView } from "@/hooks/useStrategyPositionView";
 
-// 주소 → 심볼/아이콘 매핑 (환경변수 기반)
+// address -> symbol/icon mapping (.env based)
 const TOKEN_META: Record<string, { symbol: string; iconUrl: string }> = {
   [(process.env.NEXT_PUBLIC_AAVE_UNDERLYING_SEPOLIA ?? "").toLowerCase()]: {
     symbol: "AAVE",
@@ -31,7 +31,7 @@ function getTokenMeta(addr: `0x${string}`) {
 
   if (meta) return meta;
 
-  // fallback: 주소 축약 표시
+  // fallback: show sliced address
   const short = `${addr.slice(0, 6)}...${addr.slice(-4)}`;
   return {
     symbol: short,
@@ -40,10 +40,10 @@ function getTokenMeta(addr: `0x${string}`) {
 }
 
 export function StrategyPositionCard() {
-  // 1) 온체인 통합 뷰 훅
+  // 1) Onchain total View Hook
   const { view, isLoading, isError, isRateLimited } = useStrategyPositionView();
 
-  // 2) Close preview 모달 상태
+  // 2) Close preview Modal State
   const [isCloseModalOpen, setIsCloseModalOpen] = useState(false);
   const [selectedTokenId, setSelectedTokenId] = useState<number | null>(null);
 
@@ -56,11 +56,11 @@ export function StrategyPositionCard() {
     setIsCloseModalOpen(false);
   };
 
-  // 3) 온체인 view → Row에서 쓰는 StrategyPositionRowData로 변환
+  // 3) Onchain view → Change Row - StrategyPositionRowData
   let rowData: StrategyPositionRowData | null = null;
 
   if (view && view.tokenId !== 0n) {
-    // "닫힌" 포지션은 아예 없는 것으로 취급
+    // !isOpen == null
     const isEffectivelyClosed =
       !view.isOpen ||
       (view.totalCollateralUsd === 0 && view.totalDebtUsd === 0);
@@ -110,9 +110,9 @@ export function StrategyPositionCard() {
 
   return (
     <>
-      {/* 메인 카드 */}
+      {/* Main Card */}
       <div className="rounded-2xl border border-slate-800/60 bg-slate-950/70 shadow-sm">
-        {/* 헤더 */}
+        {/* Header*/}
         <div className="flex items-center justify-between border-b border-slate-800/60 px-6 py-4">
           <div className="flex flex-col">
             <h2 className="text-xl font-semibold text-slate-50">
@@ -147,7 +147,7 @@ export function StrategyPositionCard() {
           </div>
         </div>
 
-        {/* 본문 */}
+        {/* Body */}
         <div className="px-6 py-5">
           {isLoading ? (
             <div className="py-8 text-center text-sm text-slate-500">
@@ -177,7 +177,7 @@ export function StrategyPositionCard() {
         </div>
       </div>
 
-      {/* Close preview 모달 */}
+      {/* Close preview Modal */}
       {selectedTokenId !== null && rowData && (
         <ClosePositionPreviewModal
           isOpen={isCloseModalOpen}

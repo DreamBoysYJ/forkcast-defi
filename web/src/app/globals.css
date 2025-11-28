@@ -1,4 +1,4 @@
-/* ===== Forkcast: asset row 공통 스타일 ===== */
+/* ===== asset row : common style ===== */
 @import "tailwindcss";
 
 body {
@@ -6,15 +6,15 @@ body {
 }
 
 
-/* ===== Forkcast 공통 테이블 스타일 ===== */
+/* ===== table common style ===== */
 
-/* 한 줄(row) 기본 스타일 */
+
 .fc-row {
   @apply border-b border-slate-100 last:border-b-0;
 }
 
 .fc-cell {
-  /* 가로는 그대로, 세로만 줄이기 */
+
   @apply px-4 py-2 align-middle text-[13px] text-slate-900;
 }
 
@@ -37,13 +37,13 @@ body {
 .fc-asset-symbol {
   @apply text-[13px] font-medium text-slate-900;
 }
-/* 작은 회색 텍스트 */
+
 .fc-muted {
   font-size: 11px;
   color: #9ca3af;
 }
 
-/* 피ILL 버튼(Preview strategy) 스타일 */
+/* button style*/
 .fc-btn-pill {
   font-size: 11px;
   padding: 4px 12px;

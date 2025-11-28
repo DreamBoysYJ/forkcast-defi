@@ -1,4 +1,3 @@
-// src/abi/erc20Abi.ts
 export const erc20Abi = [
   {
     type: "function",

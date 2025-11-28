@@ -7,7 +7,7 @@ import {
 } from "./AssetsToBorrowCardRow";
 import { useAaveBorrowAssets } from "@/hooks/useAaveBorrowAssets";
 
-// 심볼 → 아이콘 경로 매핑
+// symbol -> icon mapping
 function getAssetIcon(symbol: string): string {
   const map: Record<string, string> = {
     AAVE: "/tokens/aave.png",
@@ -26,13 +26,13 @@ function getAssetIcon(symbol: string): string {
 export function AssetsToBorrowCard() {
   const { rows, isLoading, isError } = useAaveBorrowAssets();
 
-  // ✅ 훅에서 온 rows → UI에서 쓰는 BorrowAsset 으로 변환
+  // rows from hook → change UI  - BorrowAsset
   const borrowAssets: BorrowAsset[] = rows.map((r) => ({
     symbol: r.symbol,
     iconUrl: getAssetIcon(r.symbol),
     available: r.available,
-    availableUsd: r.availableUsd ?? 0, // 지금은 0이면 0, 나중에 오라클 붙이면 변경
-    // 훅: 79.0 같은 퍼센트 → 카드: 0.79 형식
+    availableUsd: r.availableUsd ?? 0,
+    // ex. hook: 79.0  → card: 0.79
     borrowApy: r.apyPercent / 100,
   }));
 
@@ -82,7 +82,7 @@ export function AssetsToBorrowCard() {
                     </td>
                   </tr>
                 ) : (
-                  // ✅ 여기서는 rows 말고 borrowAssets 사용
+                  // use borrowAssets, not rows
                   borrowAssets.map((asset) => (
                     <AssetsToBorrowCardRow key={asset.symbol} asset={asset} />
                   ))

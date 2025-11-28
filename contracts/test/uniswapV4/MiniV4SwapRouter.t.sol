@@ -2,6 +2,13 @@
 pragma solidity 0.8.28;
 
 /**
+ * @title MiniV4SwapRouterTest
+ * @notice Integration-style tests for MiniV4SwapRouter on a Sepolia fork.
+ *         Covers:
+ *          - Happy-path swaps in both directions
+ *          - Basic pool bootstrap (initialize + addLiquidity)
+ *          - Guards around amountIn, slippage, uninitialized pool, no liquidity,
+ *            and unauthorized unlockCallback callers
  */
 
 import "forge-std/Test.sol";
@@ -57,31 +64,31 @@ contract MiniV4SwapRouterTest is Test {
         _deployRouter();
     }
 
-    /// -------< Succeess Cases >--------------
+    /// ======================= Success paths =======================
 
-    /// @dev pool init -> add Liq 작동 확인
+    /// @dev Sanity check: can initialize an AAVE/WBTC pool and mint wide-range LP.
     function test_InitPool_Then_AddLiquidity() public {
-        // 1) AAVE/WBTC 풀 초기화
+        // 1) Initialize AAVE/WBTC pool at 1:1 price
         (PoolKey memory key, int24 initTick) = _initPool();
 
-        // 2) 유동성 공급
+        // 2) Provide wide-range liquidity
         address lp = makeAddr("lp");
         uint256 tokenId = _addLiquidityWideDefault(key, lp);
 
-        // 3) 검증 : NFT
+        // 3) Validate NFT tick range matches our default full-range config
         PositionInfo info = positionManager.positionInfo(tokenId);
         (, int24 low, int24 up, ) = _decodePositionInfo(info);
         assertEq(low, -887220);
         assertEq(up, 887220);
     }
 
-    /// @dev pool init -> add Liq -> MiniV4SwapRouter를 통해 ExactInputSingle 성공
-    /// @dev zeroForOne = true 일 경우 테스트
+    /// @dev Happy path: token0 -> token1 swap via MiniV4SwapRouter (zeroForOne = true).
+
     function test_SwapExactInputSingle_ZeroForOne_Succeeds() public {
-        // 1) 풀 + 유동성 세팅
+        // 1) Bootstrap pool with wide liquidity
         (PoolKey memory key, uint256 tokenId) = _gienPoolWithWideLiquidity();
 
-        // 2) 유저 - 토큰 세팅
+        // 2) Fund user with token0
         address user = makeAddr("user");
         address token0 = Currency.unwrap(key.currency0);
         address token1 = Currency.unwrap(key.currency1);
@@ -92,7 +99,7 @@ contract MiniV4SwapRouterTest is Test {
         uint256 u0Before = IERC20(token0).balanceOf(user);
         uint256 u1Before = IERC20(token1).balanceOf(user);
 
-        // 3) MiniV4SwapRouter를 통해 스왑 실행
+        // 3) Execute swap through MiniV4SwapRouter
         Miniv4SwapRouter.ExactInputSingleParams memory params = Miniv4SwapRouter
             .ExactInputSingleParams({
                 poolKey: key,
@@ -105,12 +112,9 @@ contract MiniV4SwapRouterTest is Test {
         uint256 amountOut = router.swapExactInputSingle(params);
         vm.stopPrank();
 
-        // 4) 검증
-
-        // 스왑 결과물 > 0
         assertGt(amountOut, 0, "amountOut should be >0");
 
-        // 유저 잔고 변화: token0는 정확히 100e18 감소, token1는 amountOut 증가
+        // 4) Assertions: non-zero output, balances move as expected, router has no dust
         assertEq(
             IERC20(token0).balanceOf(user),
             u0Before - 100e18,
@@ -122,7 +126,6 @@ contract MiniV4SwapRouterTest is Test {
             "token1 received mismatch"
         );
 
-        // 미니 라우터 - 먼지 잔고 X (refund 동작 확인)
         assertEq(
             IERC20(token0).balanceOf(address(router)),
             0,
@@ -138,8 +141,8 @@ contract MiniV4SwapRouterTest is Test {
         //_logPoolState(key);
     }
 
-    /// @dev pool init -> add Liq -> MiniV4SwapRouter를 통해 ExactInputSingle 성공
-    /// @dev zeroForOne = false 일 경우 테스트
+    /// @dev Happy path: token1 -> token0 swap via MiniV4SwapRouter (zeroForOne = false).
+
     function test_SwapExactInputSingle_OneForZero_Succeeds() public {
         // 1) pool init + add Liquidity
         (PoolKey memory key, uint256 tokenId) = _gienPoolWithWideLiquidity();
@@ -204,9 +207,9 @@ contract MiniV4SwapRouterTest is Test {
         //_logPoolState(key);
     }
 
-    /// -------< Revert/Guard Cases >--------------
+    /// ======================= Revert / guard paths =======================
 
-    /// @dev 사용자가 amountIn = 0 호출할 시 Revert 테스트
+    /// @dev amountIn = 0 should revert (invalid swap request).
     function test_ExactInputSingle_Revert_WhenAmountInZero() public {
         // 1) pool init + add Liquidity
         (PoolKey memory key, uint256 tokenId) = _gienPoolWithWideLiquidity();
@@ -237,8 +240,7 @@ contract MiniV4SwapRouterTest is Test {
         router.swapExactInputSingle(params);
     }
 
-    /// @dev amountOutMin이 큰 경우
-    /// @dev pool 상황이 1:1이기에, amountIn = 100, amountOutMin = 100 경우 슬리피지로 revert되어야
+    /// @dev Swap must revert when amountOutMin is unrealistic given pool price (slippage protection).
     function test_ExactInputSingle_Revert_WhenSlippageExceeded() public {
         // 1) pool init + add Liquidity
         (PoolKey memory key, uint256 tokenId) = _gienPoolWithWideLiquidity();
@@ -282,7 +284,7 @@ contract MiniV4SwapRouterTest is Test {
         assertEq(u1Before, u1After, "Transaction must be revert");
     }
 
-    /// @dev pool이 init되지 않았는데 PoolKey로 스왑 시도
+    /// @dev Revert when swapping against a PoolKey that was never initialized.
     function test_ExactInputSingle_Revert_WhenPoolNotInitialized() public {
         // 1) User setup
         address user = makeAddr("user");
@@ -318,7 +320,7 @@ contract MiniV4SwapRouterTest is Test {
         router.swapExactInputSingle(params);
     }
 
-    /// @dev pool init -> 유동성이 0인데 스왑 시도
+    /// @dev Revert when pool is initialized but contains zero liquidity.
     function test_ExactInputSingle_Revert_WhenNoLiquidity() public {
         // 1) pool init
         (PoolKey memory key, ) = _initPool();
@@ -351,7 +353,7 @@ contract MiniV4SwapRouterTest is Test {
         router.swapExactInputSingle(params);
     }
 
-    /// @dev unlockCallback을 poolManager 아닌 주소가 실행할 경우
+    /// @dev unlockCallback must only be callable by PoolManager.
     function test_UnlockCallback_Revert_WhenCallerNotPoolManager() public {
         // 1) hacker setup
         address hacker = makeAddr("hacker");
@@ -363,13 +365,13 @@ contract MiniV4SwapRouterTest is Test {
         router.unlockCallback(bytes("attack"));
     }
 
-    /// -------< Helper Functions >--------------
+    /// ======================= Helpers =======================
 
     function _deployRouter() internal {
         router = new Miniv4SwapRouter(address(poolManager));
     }
 
-    /// @dev pool init -> add Liquidity 세팅
+    /// @dev Convenience helper: initialize pool and add generously wide liquidity.
     function _gienPoolWithWideLiquidity()
         internal
         returns (PoolKey memory key, uint256 tokenId)
@@ -379,7 +381,7 @@ contract MiniV4SwapRouterTest is Test {
         tokenId = _addLiquidityWideDefault(key, lp);
     }
 
-    /// @dev AAVE/WBTC 페어에 대한 기본 PoolKey를 생성 (fee 3000, tickSpacing 60, hooks 없음)
+    /// @dev Build default AAVE/WBTC PoolKey (fee 3000, spacing 60, no hooks).
     function _buildAaveWbtcPoolKey()
         internal
         view
@@ -411,7 +413,7 @@ contract MiniV4SwapRouterTest is Test {
         });
     }
 
-    /// @dev AAVE/WBTC 풀을 1:1 초기 가격으로 initialize하고 PoolKey와 초기 tick을 반환
+    /// @dev Initialize AAVE/WBTC pool at 1:1 price and return PoolKey + initial tick.
     function _initPool() internal returns (PoolKey memory key, int24 initTick) {
         key = _buildAaveWbtcPoolKey();
 
@@ -430,7 +432,7 @@ contract MiniV4SwapRouterTest is Test {
         );
     }
 
-    /// @dev PositionManager를 통해 유동성 공급
+    /// @dev Mint LP via PositionManager using Permit2 allowances.
     function _addLiquidity(
         PoolKey memory key,
         address provider,
@@ -497,8 +499,8 @@ contract MiniV4SwapRouterTest is Test {
         spent1 = bal1Before - bal1After;
     }
 
-    /// @dev tickSpacing = 60, 거의 전체 범위, 100e18 만큼 공급
-    /// @dev 풀에 많은 양의 유동성 공급이 필요할 때 사용
+    /// @dev Adds wide-range (almost full-range) liquidity with symmetric 100e18/100e18.
+
     function _addLiquidityWideDefault(
         PoolKey memory key,
         address provider
@@ -517,7 +519,7 @@ contract MiniV4SwapRouterTest is Test {
         );
     }
 
-    /// @dev uint256인 PositionInfo -> bytes25 poolId, int24 tickLower, int24 tickUpper, bool hasSubscriber 디코딩 변환 함수
+    /// @dev Decode packed PositionInfo into (poolId, tickLower, tickUpper, hasSubscriber).
     function _decodePositionInfo(
         PositionInfo info
     )
@@ -550,7 +552,7 @@ contract MiniV4SwapRouterTest is Test {
         poolId = bytes25(bytes32(poolBits)); // 테스트용이면 이 정도면 충분
     }
 
-    /// @dev 두 토큰 주소로 정렬해서 같은 순서로 PoolKey 생성
+    /// @dev Build a canonical PoolKey for (tokenA, tokenB) with given fee/spacing/hooks.
     function _buildPoolKey(
         address tokenA,
         address tokenB,

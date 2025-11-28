@@ -37,26 +37,29 @@ import {
 import {StateLibrary} from "v4-core/src/libraries/StateLibrary.sol";
 import {Slot0} from "v4-core/src/types/Slot0.sol";
 
+/// @title StrategyLens
+/// @notice Read-only view layer for the Forkcast strategy: aggregates Aave, Uniswap v4, and router state into
+///         front-end friendly structs. No state mutation, no protocol interaction beyond `view` calls.
 contract StrategyLens {
     address public admin;
 
-    // -------- AAVE 관련 --------
+    // -------- AAVE --------
     IPoolAddressesProvider public immutable AAVE_ADDRESSES_PROVIDER;
     IAaveProtocolDataProvider public immutable AAVE_DATA_PROVIDER;
     IPool public immutable AAVE_POOL;
     IPriceOracleGetter public immutable AAVE_ORACLE;
 
-    // -------- Uniswap V4 관련 --------
+    // -------- Uniswap V4 --------
     IPoolManager public immutable UNI_POOL_MANAGER;
     IPositionManager public immutable UNI_POSITION_MANAGER;
 
-    // -------- Forkcast 전용 --------
+    // -------- Forkcast --------
     AccountFactory public immutable ACCOUNT_FACTORY;
     StrategyRouter public immutable STRATEGY_ROUTER;
 
     //  ----------------- AAVE Structs -----------------
 
-    /// @dev 유저 전체 Aave 상태 요약
+    /// @dev High-level Aave account summary for a user (via vault).
     struct UserAaveOverview {
         address user;
         address vault;
@@ -68,7 +71,7 @@ contract StrategyLens {
         uint256 healthFactor;
     }
 
-    /// @dev 유저가 특정 asset을 기준으로 Aave에서 어떤 포지션 들고 있는지
+    /// @dev Per-asset Aave position for a specific user vault.
     struct UserReservePosition {
         address asset;
         uint256 aTokenBalance;
@@ -76,7 +79,7 @@ contract StrategyLens {
         uint256 variableDebt;
     }
 
-    /// @dev 리저브 메타 정보(+캡, paused 상태)
+    /// @dev Static configuration and caps for a reserve (what the UI needs to decide "is this asset usable?").
     struct ReserveStaticData {
         address asset;
         string symbol;
@@ -98,7 +101,7 @@ contract StrategyLens {
         bool paused;
     }
 
-    /// @dev 내부 헬퍼용: 리저브 설정값 모음
+    /// @dev Internal helper struct: reserve configuration slice (used to avoid stack-too-deep).
     struct ReserveConfigView {
         uint256 decimals;
         uint256 ltv;
@@ -112,38 +115,39 @@ contract StrategyLens {
         bool isFrozen;
     }
 
-    /// @dev 내부 헬퍼용: 토큰 주소들
+    /// @dev Internal helper struct: token addresses for a reserve.
     struct ReserveTokensView {
         address aToken;
         address stableDebtToken;
         address variableDebtToken;
     }
 
-    /// @dev 내부 헬퍼용: 캡 + paused
+    /// @dev Internal helper struct: caps + `paused` flag.
     struct ReserveCapsView {
         uint256 borrowCap;
         uint256 supplyCap;
         bool paused;
     }
 
-    /// 금리(APY) 관련
+    /// @dev Rate data (in RAY) for a reserve.
     struct ReserveRateData {
         address asset;
-        string symbol; // 👈 이거 반드시 들어가야 함
-        uint256 liquidityRateRay; // 예치 금리 (RAY)
-        uint256 variableBorrowRateRay; // 변동 대출 금리 (RAY)
-        uint256 stableBorrowRateRay; // 고정 대출 금리 (RAY)
+        string symbol; // UI wants the symbol alongside the asset address.
+        uint256 liquidityRateRay; // deposit APY (ray)
+        uint256 variableBorrowRateRay; // variable borrow APY (ray)
+        uint256 stableBorrowRateRay; // stable borrow APY (ray)
     }
 
-    /// 가격 관련
+    /// @dev Price for an asset in Aave's base currency.
     struct AssetPriceData {
         address asset;
-        // BASE_CURRENCY 기준 가격 (Aave Oracle 단위 그대로)
+        // BASE_CURRENCY based price (Aave Oracle)
         uint256 priceInBaseCurrency;
     }
 
     //  ----------------- Uniswap Structs -----------------
-    /// 유니스왑 포지션 + 풀 정보
+
+    /// @dev Uniswap v4 position snapshot plus pool price info.
     struct UniPositionOverview {
         address token0;
         address token1;
@@ -156,7 +160,7 @@ contract StrategyLens {
         uint160 sqrtPriceX96;
     }
 
-    /// @dev Router에 저장된 기본 포지션 정보(내부 PositionInfo의 축약 버전)
+    /// @dev Core router-managed metadata for a strategy position.
     struct RouterPositionCore {
         address owner;
         address vault;
@@ -165,23 +169,23 @@ contract StrategyLens {
         bool isOpen;
     }
 
-    /// @dev 한 전략 포지션에 대한 "통합 뷰"
-    ///      - Router 메타 정보
-    ///      - Uniswap v4 포지션 요약
-    ///      - Aave 계정 상태 요약
+    /// @dev Full strategy position view for one tokenId:
+    ///      - Router metadata
+    ///      - Uniswap v4 position snapshot
+    ///      - Aave account summary (via vault)
     struct StrategyPositionView {
         RouterPositionCore core;
-        // Uniswap v4 관련
+        // Uniswap v4
         address uniToken0;
         address uniToken1;
         uint128 liquidity;
-        uint256 amount0Now; // 지금 전부 빼면 받는 token0
-        uint256 amount1Now; // 지금 전부 빼면 받는 token1
+        uint256 amount0Now;
+        uint256 amount1Now;
         int24 tickLower;
         int24 tickUpper;
         int24 currentTick;
         uint160 sqrtPriceX96;
-        // Aave 계정 요약 (vault 기준)
+        // Aave (vault)
         uint256 totalCollateralBase;
         uint256 totalDebtBase;
         uint256 availableBorrowBase;
@@ -220,19 +224,23 @@ contract StrategyLens {
         STRATEGY_ROUTER = StrategyRouter(_strategyRouter);
     }
 
-    // -------- AAVE 관련 함수 --------
+    // =========================================================
+    //                       AAVE VIEW
+    // =========================================================
 
-    // ----------------- 1) 유저 → 볼트 조회 -----------------
-    /// @notice 지갑 주소로 UserAccount(Valut) 주소 조회
-    /// @dev    포지션 없으면 vault == address(0)
+    // ----------------- 1) User → vault mapping -----------------
+
+    /// @notice Resolve the vault(UserAccount) for a given user.
+    /// @dev    Returns address(0) when the user has no vault yet.
     function getUserVault(address user) public view returns (address vault) {
         vault = ACCOUNT_FACTORY.accountOf(user);
     }
 
-    // ----------------- 2) 유저 Aave 전체 요약 -----------------
+    // ----------------- 2) User Aave overview -----------------
 
-    /// @notice 유저의 Aave 전체 포지션 요약 (HF, 담보/부채, vault )
-    /// @dev    프론트에서 '대시보드 상단 카드'에 그대로 넣을 데이터
+    /// @notice High-level Aave overview for a user (via their vault).
+    /// @dev    Intended for "top summary card" usage on the dashboard.
+
     function getUserAaveOverview(
         address user
     ) external view returns (UserAaveOverview memory ov) {
@@ -273,10 +281,10 @@ contract StrategyLens {
         });
     }
 
-    // ----------------- 3) 리저브 메타데이터 (전역) -----------------
+    // ----------------- 3) Reserve metadata (global) -----------------
 
-    /// @notice Aave 상의 모든 리저브(토큰)에 대한 설정/상태 정보
-    /// @dev    프론트에서 '지원 자산 리스트 + LTV, Caps, Paused 여부' 보여줄 때 사용
+    /// @notice Static configuration and caps for every Aave reserve.
+    /// @dev    Used to render "supported assets list" (LTV, caps, pause status, etc.).
     function getAllAaveReserves()
         external
         view
@@ -295,7 +303,7 @@ contract StrategyLens {
         }
     }
 
-    /// @dev 내부에서 struct 3개에 나눠 담아서 stack depth 줄이기
+    /// @dev Composes `ReserveStaticData` from the three lower-level views to avoid stack-too-deep issues.
     function _getReserveStaticData(
         address asset,
         string memory symbol
@@ -326,7 +334,7 @@ contract StrategyLens {
         });
     }
 
-    /// @dev Aave DataProvider: getReserveConfigurationData
+    /// @dev Wraps `getReserveConfigurationData` into a smaller struct for local usage.
     function _getReserveConfigData(
         address asset
     ) internal view returns (ReserveConfigView memory cfg) {
@@ -344,7 +352,7 @@ contract StrategyLens {
         ) = AAVE_DATA_PROVIDER.getReserveConfigurationData(asset);
     }
 
-    /// @dev Aave DataProvider: getReserveTokensAddresses
+    /// @dev Wraps `getReserveTokensAddresses`.
     function _getReserveTokensData(
         address asset
     ) internal view returns (ReserveTokensView memory t) {
@@ -352,7 +360,7 @@ contract StrategyLens {
             .getReserveTokensAddresses(asset);
     }
 
-    /// @dev Aave DataProvider: getReserveCaps + getPaused(try/catch)
+    /// @dev Wraps `getReserveCaps` and optionally `getPaused` (older deployments may not implement `getPaused`).
     function _getReserveCapsData(
         address asset
     ) internal view returns (ReserveCapsView memory caps) {
@@ -360,7 +368,7 @@ contract StrategyLens {
             asset
         );
 
-        // 배포에 따라 없을 수 있으니 try/catch
+        // Some deployments do not expose `getPaused`; fallback to `false` in that case.
         try AAVE_DATA_PROVIDER.getPaused(asset) returns (bool isPaused) {
             caps.paused = isPaused;
         } catch {
@@ -368,12 +376,10 @@ contract StrategyLens {
         }
     }
 
-    // ----------------- 4) 유저 개별 리저브 포지션 -----------------
+    // ----------------- 4) User reserve positions (selected assets) -----------------
 
-    /// @notice 유저가 주어진 asset 리스트에 대해 Aave에서 들고 있는 예치/부채 잔고 조회
-    /// @dev 프론트에서 “내 포지션 - 토큰별 상세 테이블” 용
-    ///         - assets : 예) [AAVE, WBTC]
-    ///         - return : 각 asset에 대해 aToken/StableDebt/VariableDebt
+    /// @notice Aave balances for a given user and a list of assets.
+    /// @dev    Intended for "per-asset table" views (aToken / stable / variable debt).
     function getUserReservePositions(
         address user,
         address[] memory assets
@@ -381,6 +387,7 @@ contract StrategyLens {
         address vault = ACCOUNT_FACTORY.accountOf(user);
         positions = new UserReservePosition[](assets.length);
 
+        // If the user has no vault yet, we simply return zeroed positions for the requested assets.
         if (vault == address(0)) {
             for (uint256 i = 0; i < assets.length; i++) {
                 positions[i] = UserReservePosition({
@@ -421,10 +428,10 @@ contract StrategyLens {
         }
     }
 
-    // ----------------- 5) 유저 리저브 포지션 (전체 리저브 자동) -----------------
+    // ----------------- 5) User reserve positions (all reserves) -----------------
 
-    /// @notice Aave에 등록된 모든 리저브에 대해 유저 포지션 조회
-    /// @dev 프론트에서 "내 Aave 포지션 전체 보기" 버튼 누르면 이거 한 방에 호출하면 됨
+    /// @notice Aave positions for a user across all reserves currently listed.
+    /// @dev    Used for "show all my Aave positions" style views.
     function getUserReservePositionsAll(
         address user
     ) external view returns (UserReservePosition[] memory positions) {
@@ -439,9 +446,9 @@ contract StrategyLens {
         positions = getUserReservePositions(user, assets);
     }
 
-    // ----------------- 6) 리저브 금리(APY) -----------------
+    // ----------------- 6) Reserve rates (APY) -----------------
 
-    /// @notice 단일 리저브의 금리 정보 (RAY 단위)
+    /// @notice Rate data for a single reserve (in ray).
     function getReserveRates(
         address asset
     ) external view returns (ReserveRateData memory r) {
@@ -458,20 +465,21 @@ contract StrategyLens {
             uint256 liquidityIndex,
             uint256 variableBorrowIndex,
             uint40 lastUpdateTimestamp
-        ) = AAVE_DATA_PROVIDER.getReserveData(asset); // v2 D
-        // 단일 자산이니까 심볼은 그냥 ERC20 메타데이터에서 읽어오면 됨
+        ) = AAVE_DATA_PROVIDER.getReserveData(asset);
+
+        // For a single asset, we can safely fetch the symbol from ERC20 metadata.
         string memory symbol = IERC20Metadata(asset).symbol();
 
         r = ReserveRateData({
             asset: asset,
-            symbol: symbol, // 👈 이 줄 추가
+            symbol: symbol,
             liquidityRateRay: liquidityRate,
             variableBorrowRateRay: variableBorrowRate,
             stableBorrowRateRay: stableBorrowRate
         });
     }
 
-    /// @notice 모든 리저브에 대한 금리 정보
+    /// @notice Rate data for all reserves.
     function getAllReserveRates()
         external
         view
@@ -481,7 +489,7 @@ contract StrategyLens {
             .getAllReservesTokens();
 
         uint256 len = tokens.length;
-        rates = new ReserveRateData[](len); // ✅ 반드시 new
+        rates = new ReserveRateData[](len);
 
         for (uint256 i = 0; i < len; ++i) {
             address asset = tokens[i].tokenAddress;
@@ -499,7 +507,7 @@ contract StrategyLens {
                 uint256 liquidityIndex,
                 uint256 variableBorrowIndex,
                 uint40 lastUpdateTimestamp
-            ) = AAVE_DATA_PROVIDER.getReserveData(asset); // v2 DataProvider는 여기까지 10개(return 10개)임
+            ) = AAVE_DATA_PROVIDER.getReserveData(asset);
 
             rates[i].asset = asset;
             rates[i].symbol = tokens[i].symbol;
@@ -509,14 +517,14 @@ contract StrategyLens {
         }
     }
 
-    // ----------------- 7) Aave 오라클 가격 -----------------
+    // ----------------- 7) Aave oracle prices -----------------
 
-    /// @notice 단일 자산 가격 (BASE_CURRENCY 기준)
+    /// @notice Price of a single asset in Aave's base currency.
     function getAssetPrice(address asset) external view returns (uint256) {
         return AAVE_ORACLE.getAssetPrice(asset);
     }
 
-    /// @notice 여러 자산 가격 (asset + price 묶어서 리턴)
+    /// @notice Prices of multiple assets in Aave's base currency.
     function getAssetsPrices(
         address[] calldata assets
     ) external view returns (AssetPriceData[] memory prices) {
@@ -532,7 +540,8 @@ contract StrategyLens {
         }
     }
 
-    /// @notice 오라클 기준 통화 & 단위 (프론트에서 스케일링 계산용)
+    /// @notice Base currency and its unit used by the Aave oracle.
+    /// @dev    Needed by the front-end to scale prices into human-readable units.
     function getOracleBaseCurrency()
         external
         view
@@ -543,11 +552,11 @@ contract StrategyLens {
     }
 
     // =========================================================
-    //                  Uniswap V4 뷰 함수
+    //                     UNISWAP V4 VIEW
     // =========================================================
 
-    /// @notice 특정 유저 + tokenId 기준으로 Uniswap V4 포지션 상태 조회
-    /// @dev    프론트에서 "내 포지션 카드" 하나 렌더링할 때 딱 쓰기 좋은 형태
+    /// @notice Uniswap v4 position view for a given user and tokenId.
+    /// @dev    Shape is optimized for rendering a single position card.
     function getUserUniPosition(
         address user,
         uint256 tokenId
@@ -585,14 +594,15 @@ contract StrategyLens {
     }
 
     // =========================================================
-    //                  통합 포지션 뷰 함수
+    //                 INTEGRATED STRATEGY VIEW
     // =========================================================
-    /// @notice tokenId 기준으로 이 전략 포지션의 전체 뷰를 한 번에 가져온다.
-    /// @dev 프론트에서 "전략 상세 카드" 하나 그릴 때 이거 한 방에 쓰면 됨.
+
+    /// @notice Returns a full strategy position view for a single tokenId.
+    /// @dev    Ideal for a "strategy detail" panel: router meta + Uni v4 + Aave in one call.
     function getStrategyPositionView(
         uint256 tokenId
     ) external view returns (StrategyPositionView memory v) {
-        // 1) Router에 저장된 포지션 메타 정보 로딩
+        // 1) Router metadata
         RouterPositionCore memory core;
         (
             core.owner,
@@ -604,12 +614,12 @@ contract StrategyLens {
 
         v.core = core;
 
-        // vault가 없으면 (아직 포지션 없는 상태) 나머지는 전부 0으로 리턴
+        // If there is no vault yet, return the core and zero everything else.
         if (core.vault == address(0)) {
             return v;
         }
 
-        // 2) Uniswap v4 포지션 요약
+        // 2) Uniswap v4 position snapshot
         (
             v.uniToken0,
             v.uniToken1,
@@ -622,7 +632,7 @@ contract StrategyLens {
             v.sqrtPriceX96
         ) = STRATEGY_ROUTER.previewUniPosition(tokenId);
 
-        // 3) Aave 계정 상태 (vault 기준)
+        // 3) Aave account state (vault as account)
         (
             v.totalCollateralBase,
             v.totalDebtBase,

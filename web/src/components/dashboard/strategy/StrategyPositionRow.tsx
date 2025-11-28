@@ -10,22 +10,22 @@ export type StrategyPositionRowData = {
   tokenId: number;
   isOpen: boolean;
 
-  // 전략 구성
+  // strategy position
   supplyToken: TokenUi;
   borrowToken: TokenUi;
   owner: string;
   vault: string;
 
-  // Uni v4 상태
+  // Uni v4 state
   poolToken0: TokenUi;
   poolToken1: TokenUi;
   amount0Now: number;
   amount1Now: number;
-  rangeLabel: string; // 예: "1,500 – 2,500"
-  currentTickLabel: string; // 예: "Current tick 1,800"
+  rangeLabel: string; // ex: "1,500 – 2,500"
+  currentTickLabel: string; // ex: "Current tick 1,800"
   inRange: boolean;
 
-  // Aave 리스크
+  // Aave risks
   totalCollateralUsd: number;
   totalDebtUsd: number;
   availableBorrowUsd: number;
@@ -93,7 +93,7 @@ export function StrategyPositionRow({ data, onClickPreviewClose }: Props) {
 
   return (
     <div className="grid gap-6 md:grid-cols-3">
-      {/* 1) 전략 구성 블럭 */}
+      {/* 1) Strategy structure Block */}
       <div className="flex flex-col gap-3">
         <div className="text-xs font-medium uppercase tracking-wide text-slate-400">
           Strategy composition
@@ -163,14 +163,14 @@ export function StrategyPositionRow({ data, onClickPreviewClose }: Props) {
         </div>
       </div>
 
-      {/* 2) Uni v4 포지션 블럭 */}
+      {/* 2) Uni v4 Position Block */}
       <div className="flex flex-col gap-3">
         <div className="text-xs font-medium uppercase tracking-wide text-slate-400">
           Uniswap v4 position
         </div>
 
         <div className="flex items-center gap-3">
-          {/* 풀 아이콘 2개 겹치기 */}
+          {/* Overlap two icons in pool  */}
           <div className="flex -space-x-1">
             {poolToken0.iconUrl && (
               <img
@@ -222,7 +222,7 @@ export function StrategyPositionRow({ data, onClickPreviewClose }: Props) {
         </div>
       </div>
 
-      {/* 3) Aave 리스크 블럭 */}
+      {/* 3) Aave risks block */}
       <div className="flex flex-col justify-between gap-3">
         <div>
           <div className="text-xs font-medium uppercase tracking-wide text-slate-400">

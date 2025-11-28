@@ -4,7 +4,6 @@
 import { YourSupplyRow, type YourSupply } from "./YourSupplyRow";
 import { useAaveUserSupplies } from "@/hooks/useAaveUserSupplies";
 
-// 심볼 → 아이콘 경로 매핑
 function getAssetIcon(symbol: string): string {
   const map: Record<string, string> = {
     AAVE: "/tokens/aave.png",
@@ -36,7 +35,7 @@ export function YourSupplyCard() {
     <section className="mt-8 flex justify-center">
       <div className="w-full max-w-5xl rounded-2xl border border-slate-800/40 bg-slate-900/40 p-3">
         <div className="overflow-hidden rounded-xl bg-white shadow-sm">
-          {/* 카드 헤더 */}
+          {/* Card Header */}
           <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
             <h2 className="text-sm font-semibold text-slate-900">
               Your supplies
@@ -46,7 +45,7 @@ export function YourSupplyCard() {
             </span>
           </div>
 
-          {/* 리스트 테이블 */}
+          {/* List table */}
           <div className="overflow-x-auto">
             <table className="min-w-full border-collapse">
               <thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-400">

@@ -1,4 +1,3 @@
-// src/app/api/demo-trader/run/route.ts
 import { NextResponse } from "next/server";
 import { runDemoTrade } from "@/lib/demoTrader";
 

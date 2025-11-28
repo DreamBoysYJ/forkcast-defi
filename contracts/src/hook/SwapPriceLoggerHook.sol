@@ -18,14 +18,18 @@ import {
     BeforeSwapDeltaLibrary
 } from "../types/uniswapV4/BeforeSwapDelta.sol";
 
+/// @title SwapPriceLoggerHook
+/// @notice Uniswap v4 hook that is read-only for accounting and only logs price/tick on swaps.
 contract SwapPriceLoggerHook {
     using PoolIdLibrary for PoolKey;
 
     error NotPoolManager();
     error HookNotImplemented();
 
+    /// @notice The PoolManager this hook is wired to. No other caller is accepted.
     IPoolManager public immutable poolManager;
 
+    /// @notice Emitted on every swap, capturing the pool id, tick and sqrtPriceX96 at that moment.
     event SwapPriceLogged(
         PoolId indexed poolId,
         int24 tick,
@@ -33,16 +37,22 @@ contract SwapPriceLoggerHook {
         uint256 timestamp
     );
 
+    /// @dev Simple guard: hooks must only ever be called by the bound PoolManager.
     modifier onlyPoolManager() {
         if (msg.sender != address(poolManager)) revert NotPoolManager();
         _;
     }
 
+    /// @param _poolManager The v4 PoolManager this hook instance is attached to.
     constructor(address _poolManager) {
         poolManager = IPoolManager(_poolManager);
+
+        // If you want safety checks on permissions at deploy time, uncomment:
         //Hooks.validateHookPermissions(address(this), getHookPermissions());
     }
 
+    /// @notice Declare which hook callbacks are actually implemented by this contract.
+    /// @dev Only `afterSwap` is enabled; all others are effectively no-ops.
     function getHookPermissions()
         public
         pure
@@ -57,7 +67,7 @@ contract SwapPriceLoggerHook {
                 beforeRemoveLiquidity: false,
                 afterRemoveLiquidity: false,
                 beforeSwap: false,
-                afterSwap: true, // ✅ 여기만 true
+                afterSwap: true, // ✅ true
                 beforeDonate: false,
                 afterDonate: false,
                 beforeSwapReturnDelta: false,
@@ -67,15 +77,18 @@ contract SwapPriceLoggerHook {
             });
     }
 
+    // ----------------- Initialize -----------------
+
+    /// @dev Unused, but must return its selector to satisfy the hook interface.
     function beforeInitialize(
         address,
         PoolKey calldata,
         uint160
     ) external onlyPoolManager returns (bytes4) {
-        // 안 쓸 거면 그냥 selector만 돌려주면 됨
         return this.beforeInitialize.selector;
     }
 
+    /// @dev Unused, but kept for completeness with the v4 hook surface.
     function afterInitialize(
         address,
         PoolKey calldata,
@@ -87,16 +100,17 @@ contract SwapPriceLoggerHook {
 
     // ----------------- Add Liquidity -----------------
 
+    /// @dev Place to plug in liquidity-related accounting or limits if needed later.
     function beforeAddLiquidity(
         address,
         PoolKey calldata,
         ModifyLiquidityParams calldata,
         bytes calldata
     ) external onlyPoolManager returns (bytes4) {
-        // 카운팅 하고 싶으면 여기서 ++ 가능
         return this.beforeAddLiquidity.selector;
     }
 
+    /// @dev Returns a zero delta so this hook never mutates pool accounting.
     function afterAddLiquidity(
         address,
         PoolKey calldata,
@@ -105,12 +119,12 @@ contract SwapPriceLoggerHook {
         BalanceDelta,
         bytes calldata
     ) external onlyPoolManager returns (bytes4, BalanceDelta) {
-        // 아무 영향 없게 ZERO delta 리턴
         return (this.afterAddLiquidity.selector, BalanceDelta.wrap(0));
     }
 
     // ----------------- Remove Liquidity -----------------
 
+    /// @dev Symmetric to `beforeAddLiquidity`, reserved for future extensions.
     function beforeRemoveLiquidity(
         address,
         PoolKey calldata,
@@ -120,6 +134,7 @@ contract SwapPriceLoggerHook {
         return this.beforeRemoveLiquidity.selector;
     }
 
+    /// @dev Returns a zero delta so removing liquidity is untouched by this hook.
     function afterRemoveLiquidity(
         address,
         PoolKey calldata,
@@ -133,16 +148,18 @@ contract SwapPriceLoggerHook {
 
     // ----------------- Swap -----------------
 
+    /// @dev Hook point to introduce price / slippage guards in the future.
     function beforeSwap(
         address,
         PoolKey calldata,
         SwapParams calldata,
         bytes calldata
     ) external onlyPoolManager returns (bytes4, BeforeSwapDelta, uint24) {
-        // 가격/슬리피지 가드 넣고 싶으면 여기서 가능
         return (this.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
     }
 
+    /// @notice Core logic: read current price/tick from pool state and emit a structured event.
+    /// @dev Does not touch balances or fees; the second return value is zero to keep swaps unchanged.
     function afterSwap(
         address, // sender
         PoolKey calldata key,
@@ -150,7 +167,6 @@ contract SwapPriceLoggerHook {
         BalanceDelta, // delta
         bytes calldata // hookData
     ) external onlyPoolManager returns (bytes4, int128) {
-        // ✅ 여기서 가격/틱 읽어서 이벤트 로그
         PoolId poolId = key.toId();
 
         (uint160 sqrtPriceX96, int24 tick, , ) = StateLibrary.getSlot0(

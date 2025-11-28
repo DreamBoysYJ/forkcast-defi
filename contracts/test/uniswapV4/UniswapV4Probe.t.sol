@@ -2,6 +2,13 @@
 pragma solidity 0.8.28;
 
 /**
+ * @title UniswapV4ProbeTest
+ * @notice Low-level probe tests for Uniswap v4 on Sepolia.
+ *         Scope:
+ *           - PoolManager.initialize for AAVE/WBTC pool
+ *           - PositionManager.modifyLiquidities add/remove flows
+ *           - Fee collection vs. liquidity changes
+ *           - MiniV4SwapRouter integration + basic revert guards
  */
 
 import "forge-std/Test.sol";
@@ -59,15 +66,15 @@ contract UniswapV4ProbeTest is Test {
         _deployRouter();
     }
 
-    /// -------< Succeess Cases >--------------
+    // ============================ Success cases ============================
 
-    /// @dev PoolManager : pool init 성공
+    /// @dev Only checks that pool initialization succeeds for the AAVE/WBTC pair.
     function test_InitPool_Succeeds() public {
         // 1) AAVE/WBTC 풀 초기화
         (PoolKey memory key, int24 initTick) = _initPool();
     }
 
-    /// @dev  pool init -> PositionManager : modifyLiquidites 유동성 추가
+    /// @dev init pool -> add liquidity once -> assert position liquidity.
     function test_ModifyLiquidity_Add_Succeeds() public {
         // 1) 풀 + 유동성 추가 (Liq = 100e18)
         (PoolKey memory key, uint256 tokenId) = _givenPoolWithWideLiquidity();
@@ -77,7 +84,7 @@ contract UniswapV4ProbeTest is Test {
         assertEq(liquidity, 100e18, "liquidity must be same as increasement");
     }
 
-    /// @dev pool init -> PositionManager : modifyLiquidites 유동성 추가 -> 유동성 전체 제거
+    /// @dev init pool -> add liquidity -> remove all liquidity and assert zero.
     function test_ModifyLiquidity_RemoveAll_Succeeds() public {
         // 1) 풀 init
         (PoolKey memory key, int24 initTick) = _initPool();
@@ -139,7 +146,7 @@ contract UniswapV4ProbeTest is Test {
         assertEq(liquidity, 0, "liquidity must be same as increasement");
     }
 
-    /// @dev pool init -> 유동성 추가 -> 유동성 '절반' 제거
+    /// @dev init pool -> add liquidity -> remove half and assert half remains.
     function test_ModifyLiquidity_RemoveHalf_Succeeds() public {
         // 1) 풀 init
         (PoolKey memory key, int24 initTick) = _initPool();
@@ -204,7 +211,7 @@ contract UniswapV4ProbeTest is Test {
         );
     }
 
-    /// @dev pool init -> 유동성 추가 -> 활성화 상태에서 스왑 일으키기 -> 수수료만 먹기 (유동성 그대로)
+    /// @dev init pool -> add liquidity -> trigger swap -> collect only fees (no liquidity change).
     function test_CollectFee_Succeeds() public {
         // 1) 풀 init
         (PoolKey memory key, ) = _initPool();
@@ -292,7 +299,7 @@ contract UniswapV4ProbeTest is Test {
         vm.stopPrank();
     }
 
-    /// @dev pool init -> 유동성 추가 -> 활성화 상태에서 스왑 일으키기 -> 모든 유동성 제거 (수수료 포함)
+    /// @dev init pool -> add liquidity -> trigger swap -> remove all liquidity (principal + fees).
     function test_ModifyLiquidity_RemoveAll_WithFee_Succeeds() public {
         // 1) 풀 init
         (PoolKey memory key, ) = _initPool();
@@ -376,9 +383,9 @@ contract UniswapV4ProbeTest is Test {
         vm.stopPrank();
     }
 
-    /// -------< Revert/Guard Cases >--------------
+    // ============================ Revert / guard cases ============================
 
-    /// @dev pool이 init되지 않았는데 PoolKey로 스왑 시도
+    /// @dev Swapping against a non-initialized pool must revert.
     function test_ExactInputSingle_Revert_WhenPoolNotInitialized() public {
         // 1) User setup
         address user = makeAddr("user");
@@ -414,7 +421,7 @@ contract UniswapV4ProbeTest is Test {
         router.swapExactInputSingle(params);
     }
 
-    /// @dev currency0 >= currency1 PoolKey 생성 후  pool init 실패
+    /// @dev Initializing with currency0 >= currency1 should revert (wrong ordering).
     function test_InitPool_Revert_WhenCurrenciesOutOfOrder() public {
         // 1) 토큰 주소 정렬
         address token0;
@@ -450,7 +457,7 @@ contract UniswapV4ProbeTest is Test {
         poolManager.initialize(key, sqrtPriceX96);
     }
 
-    /// @dev 포지션 오너가 아닌 사람이 유동성 제거 시도
+    /// @dev Non-owner attempting to remove liquidity must revert.
     function test_ModifyLiquidity_Remove_Revert_WhenNotOwner() public {
         // 1) 풀 init
         (PoolKey memory key, int24 initTick) = _initPool();
@@ -495,8 +502,7 @@ contract UniswapV4ProbeTest is Test {
         );
     }
 
-    /// @dev 보유량 초과 유동성 제거
-    /// @dev 보유량(100e18) 초과 유동성 제거 시도 → 리버트
+    /// @dev Removing more liquidity than the position owns must revert.
     function test_ModifyLiquidity_Remove_Revert_WhenExceedsLiquidity() public {
         // 1) 풀 init
         (PoolKey memory key, ) = _initPool();
@@ -534,13 +540,13 @@ contract UniswapV4ProbeTest is Test {
         vm.stopPrank();
     }
 
-    /// -------< Helper Functions >--------------
+    // ============================ Helper functions ============================
 
     function _deployRouter() internal {
         router = new Miniv4SwapRouter(address(poolManager));
     }
 
-    /// @dev pool init -> add Liquidity 한번에 세팅
+    /// @dev init pool and immediately add a wide-range liquidity position.
     function _givenPoolWithWideLiquidity()
         internal
         returns (PoolKey memory key, uint256 tokenId)
@@ -550,7 +556,7 @@ contract UniswapV4ProbeTest is Test {
         tokenId = _addLiquidityWideDefault(key, lp);
     }
 
-    /// @dev AAVE/WBTC 페어에 대한 기본 PoolKey를 생성 (fee 3000, tickSpacing 60, hooks 없음)
+    /// @dev Canonical AAVE/WBTC PoolKey (fee 3000, tickSpacing 60, no hooks).
     function _buildAaveWbtcPoolKey()
         internal
         view
@@ -582,7 +588,7 @@ contract UniswapV4ProbeTest is Test {
         });
     }
 
-    /// @dev AAVE/WBTC 풀을 1:1 초기 가격으로 initialize하고 PoolKey와 초기 tick을 반환
+    /// @dev Initialize AAVE/WBTC pool at 1:1 and return PoolKey + initial tick.
     function _initPool() internal returns (PoolKey memory key, int24 initTick) {
         key = _buildAaveWbtcPoolKey();
 
@@ -601,7 +607,7 @@ contract UniswapV4ProbeTest is Test {
         );
     }
 
-    /// @dev PositionManager를 통해 유동성 공급
+    /// @dev Add liquidity via PositionManager, using Permit2 for token approvals.
     function _addLiquidity(
         PoolKey memory key,
         address provider,
@@ -665,7 +671,7 @@ contract UniswapV4ProbeTest is Test {
         spent1 = bal1Before - bal1After;
     }
 
-    /// @dev PositionManager통해 유동성 제거
+    /// @dev Decrease liquidity and immediately TAKE_PAIR to the recipient.
     function _removeLiquidity(
         PoolKey memory key,
         address owner,
@@ -719,8 +725,7 @@ contract UniswapV4ProbeTest is Test {
         received1 = bal1After - bal1Before;
     }
 
-    /// @dev tickSpacing = 60, 거의 전체 범위, L = 100e18, token0, token1 =  max100e18 만큼 공급
-    /// @dev 풀에 많은 양의 유동성 공급이 필요할 때 사용
+    /// @dev Wide-range, large-liquidity helper: [-887220, 887220], L=100e18.
     function _addLiquidityWideDefault(
         PoolKey memory key,
         address provider
@@ -739,7 +744,7 @@ contract UniswapV4ProbeTest is Test {
         );
     }
 
-    /// @dev PositionManager 통해 수수료만 얻기
+    /// @dev Collect only fees (no liquidity change) via a zero-liquidity DECREASE + TAKE_PAIR.
     function _collectFees(
         PoolKey memory key,
         address owner,
@@ -787,7 +792,7 @@ contract UniswapV4ProbeTest is Test {
         collected1 = bal1After - bal1Before;
     }
 
-    /// @dev uint256인 PositionInfo -> bytes25 poolId, int24 tickLower, int24 tickUpper, bool hasSubscriber 디코딩 변환 함수
+    /// @dev Decode raw PositionInfo into (poolId, tickLower, tickUpper, hasSubscriber).
     function _decodePositionInfo(
         PositionInfo info
     )
@@ -820,7 +825,7 @@ contract UniswapV4ProbeTest is Test {
         poolId = bytes25(bytes32(poolBits)); // 테스트용이면 이 정도면 충분
     }
 
-    /// @dev 두 토큰 주소로 정렬해서 같은 순서로 PoolKey 생성
+    /// @dev Canonical PoolKey builder from two token addresses.
     function _buildPoolKey(
         address tokenA,
         address tokenB,
@@ -847,6 +852,8 @@ contract UniswapV4ProbeTest is Test {
             hooks: hooks
         });
     }
+
+    /// @dev Raw DECREASE_LIQUIDITY + TAKE_PAIR without balance assertions (used for revert tests).
 
     function _removeLiquidityRaw(
         PoolKey memory key,

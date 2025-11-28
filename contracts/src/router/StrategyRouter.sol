@@ -16,7 +16,18 @@ import {IERC20, IERC20Metadata} from "../interfaces/IERC20.sol";
 
 import {UniswapV4LiquidityPreview} from "../libs/UniswapV4LiquidityPreview.sol";
 
+/// @notice Orchestrates the full one-shot strategy:
+///         wallet ERC20 -> Aave supply -> Aave borrow -> Uniswap v4 LP,
+///         and the reverse (LP unwind -> repay -> withdraw).
+/// @dev    High-level router that delegates protocol details to:
+///         - AaveModule      : risk / caps / HF checks + vault-level IO
+///         - UniswapV4Module : pool config, swaps, LP mint/burn, fee collection
 contract StrategyRouter is AaveModule, UniswapV4Module {
+    /// @dev Minimal position state the app actually needs to reason about.
+    ///      The real financial state lives in:
+    ///        - Aave (collateral / debt)
+    ///        - Uniswap v4 (liquidity, fees, price)
+    ///      This struct ties all of that to a single LP tokenId.
     struct PositionInfo {
         address owner;
         address vault;
@@ -28,7 +39,10 @@ contract StrategyRouter is AaveModule, UniswapV4Module {
     error PositionNotOpen();
     error NotPositionOwner();
 
+    /// @dev Uniswap v4 LP tokenId → position metadata.
     mapping(uint256 => PositionInfo) public positions; // key = LP tokenId
+
+    /// @dev Convenience index for frontends / history views.
     mapping(address => uint256[]) public userPositionIds;
 
     event PositionOpened(
@@ -45,16 +59,21 @@ contract StrategyRouter is AaveModule, UniswapV4Module {
         uint256 spent1
     );
 
+    /// @notice Emitted after a full unwind:
+    ///         - Aave debt fully repaid
+    ///         - collateral withdrawn
+    ///         - residual borrowAsset (PnL) handed back to the user.
     event PositionClosed(
         address indexed user,
         address indexed vault,
         uint256 indexed tokenId,
         address supplyAsset,
         address borrowAsset,
-        uint256 amountSupplyReturned, // 유저가 최종 받는 A 수량
-        uint256 amountBorrowReturned // 유저가 최종 받는 B 수량
+        uint256 amountSupplyReturned,
+        uint256 amountBorrowReturned
     );
 
+    /// @notice Emitted when Uniswap v4 fees are harvested without touching principal.
     event FeesCollected(
         address indexed user,
         uint256 indexed tokenId,
@@ -64,9 +83,12 @@ contract StrategyRouter is AaveModule, UniswapV4Module {
         uint256 amount1
     );
 
-    /// @param addressesProvider Aave V3 PoolAddressesProvider (Sepolia)
-    /// @param dataProvider      AaveProtocolDataProvider (Sepolia)
-    /// @param _factory          AccountFactory
+    /// @param addressesProvider Aave V3 PoolAddressesProvider (network-level entrypoint)
+    /// @param dataProvider      Aave DataProvider used for caps/config/rates
+    /// @param _factory          Factory that lazily creates per-user UserAccount vaults
+    /// @param _swapRouter       Mini v4 swap router used for single-pool swaps
+    /// @param _positionManager  Uniswap v4 PositionManager used for LP mint/burn
+    /// @param _permit2          Permit2 contract that bridges router → PoolManager allowances
     constructor(
         address addressesProvider,
         address _factory,
@@ -78,16 +100,18 @@ contract StrategyRouter is AaveModule, UniswapV4Module {
         AaveModule(addressesProvider, _factory, dataProvider)
         UniswapV4Module(_swapRouter, _positionManager)
     {
+        // We intentionally keep Permit2 wiring explicit in the router,
+        // since it’s the component that actually holds user-facing balances.
         permit2 = IPermit2(_permit2);
     }
 
-    /// @notice 주어진 tokenId에 대해
-    ///         - token0, token1
-    ///         - 현재 유동성(liquidity)
-    ///         - 지금 전부 제거하면 받을 token0 / token1 양
-    ///         - 포지션 범위(tickLower / tickUpper)
-    ///         - 현재 틱 / 현재 가격(sqrtPriceX96)
-    ///      를 한 번에 조회하는 view 함수 (프론트/렌즈용)
+    /// @notice Rich, *read-only* snapshot of a Uniswap v4 position, focused on
+    ///         “what does this look like right now?” for the frontend:
+    ///         - token0 / token1
+    ///         - current liquidity
+    ///         - full-withdrawal token amounts
+    ///         - configured tick range
+    ///         - current pool tick & sqrtPrice.
     function previewUniPosition(
         uint256 tokenId
     )
@@ -124,7 +148,10 @@ contract StrategyRouter is AaveModule, UniswapV4Module {
         );
     }
 
-    /// @dev 이미 sepolia에서 init 된 v4 Pool 정보를 admin이 한 번 더 세팅
+    /// @dev One-time admin wiring for a pre-existing v4 pool on the network.
+    ///      This does *not* initialize the pool; it just records:
+    ///         - which pool we target
+    ///         - which tick range we will always use for LP positions.
     function setUniswapV4PoolConfig(
         PoolKey memory key,
         int24 defaultTickLower,
@@ -133,14 +160,23 @@ contract StrategyRouter is AaveModule, UniswapV4Module {
         _setUniswapV4PoolConfig(key, defaultTickLower, defaultTickUpper);
     }
 
-    /// @notice 호출 전: 사용자는 반드시 supplyAsset.approve(address(this), supplyAmount)를 먼저 실행해야 함
+    /// @notice Main entrypoint for users:
+    ///         - takes supplyAsset from the caller
+    ///         - supplies into Aave
+    ///         - borrows borrowAsset (HF-constrained)
+    ///         - swaps into pool composition
+    ///         - mints a Uniswap v4 LP position owned by the vault.
+    ///
+    /// @dev Caller must:
+    ///        - hold `supplyAsset`
+    ///        - approve this router for at least `supplyAmount`.
     function openPosition(
         address supplyAsset,
         uint256 supplyAmount,
         address borrowAsset,
-        uint256 targetHF1e18 // 0이면 1.35e18로 처리
+        uint256 targetHF1e18 // if 0 -> 1.35e18 default
     ) external {
-        // Aave-v3 (Supply -> Borrow)
+        // 1) Aave leg: create/update vault, supply collateral, and borrow.
         (address userAccount, uint256 borrowedAmount) = _openAavePosition(
             msg.sender,
             supplyAsset,
@@ -152,14 +188,19 @@ contract StrategyRouter is AaveModule, UniswapV4Module {
         if (borrowedAmount == 0) {
             revert BorrowAmountZero();
         }
+
+        // Allow Uniswap contracts to pull from the vault on behalf of the router.
+
         UserAccount(userAccount).approveUniswapV4Operator(
             address(positionManager),
             address(this)
         );
 
-        // 2) Uniswap v4: Router가 들고 있는 borrowedAmount를 사용해서
-        //    - 절반 스왑해서 0/1 비율 맞추고
-        //    - vault 소유의 LP 포지션 생성
+        // 2) Uniswap v4 leg:
+        //    At this point the router holds `borrowedAmount` of `borrowAsset`.
+        //    We:
+        //      - split & swap into pool composition
+        //      - mint an LP position whose owner is the vault.
         (
             uint256 tokenId,
             uint256 spent0,
@@ -168,20 +209,23 @@ contract StrategyRouter is AaveModule, UniswapV4Module {
             uint256 amount1ForLp
         ) = _enterUniswapV4Position(userAccount, borrowAsset, borrowedAmount);
 
-        // 남은 토큰 (supplyAsset) : user 주소로 보내주기
+        // 3) Clean up any residual router balances:
+        //    - leftover supplyAsset   → back to the user
+        //    - leftover borrowAsset   → back to the vault then immediately repaid
+        //      (keeps all Aave economics scoped to the vault).
         uint256 leftover0 = IERC20(supplyAsset).balanceOf(address(this));
         uint256 leftover1 = IERC20(borrowAsset).balanceOf(address(this));
 
         if (leftover0 > 0) {
             IERC20(supplyAsset).transfer(msg.sender, leftover0);
         }
-        // 남은 토큰 (borrowAsset) : aave repay (빚 갚기)
+
         if (leftover1 > 0) {
             IERC20(borrowAsset).transfer(userAccount, leftover1);
             UserAccount(userAccount).repay(borrowAsset, leftover1);
         }
 
-        // 3) 데이터 저장
+        // 4) Persist a minimal, app-level view of the position.
         userPositionIds[msg.sender].push(tokenId);
 
         positions[tokenId] = PositionInfo({
@@ -207,9 +251,13 @@ contract StrategyRouter is AaveModule, UniswapV4Module {
         );
     }
 
-    /// @notice Close a previously opened leveraged LP position (Aave repay + v4 LP unwind)
+    /// @notice Full unwind of a live position:
+    ///         - remove Uniswap v4 liquidity
+    ///         - consolidate into borrowAsset
+    ///         - repay Aave debt
+    ///         - withdraw collateral and any remaining borrowAsset to the user.
     function closePosition(uint256 tokenId) external {
-        // 0) Position verification
+        // 0) Basic ownership / lifecycle checks at the app layer.
         PositionInfo storage p = positions[tokenId];
         if (!p.isOpen) revert PositionNotOpen();
         if (p.owner != msg.sender) revert NotPositionOwner();
@@ -219,18 +267,19 @@ contract StrategyRouter is AaveModule, UniswapV4Module {
         address supplyAsset = p.supplyAsset;
         address borrowAsset = p.borrowAsset;
 
-        // 1) Close Uniswap Position (LP 제거 + borrowAsset으로 스왑)
-        // 모든 토큰을 borrowAsset 기준으로 정리
+        // 1) Uniswap v4 leg:
+        //    Remove LP entirely and swap the non-borrowAsset side into borrowAsset,
+        //    so that the router holds a single-asset balance to repay Aave with.
         uint256 borrowAmountOut = _exitUniswapV4PositionAndSwapToBorrow(
             vault,
             borrowAsset,
             tokenId
         );
 
-        // 2) Close Aave Position (Repay BorrowAsset + Withdraw Supply)
-        //    - borrowAsset 빚 전액 상환 (vault 기준)
-        //    - 담보(supplyAsset) 전부 user에게 출금
-        //    - 남은 borrowAsset(수익)은 user에게 전송
+        // 2) Aave leg:
+        //    - repay all variable debt in `borrowAsset`
+        //    - withdraw full collateral in `supplyAsset`
+        //    - send any leftover borrowAsset (profit) back to the user.
 
         (
             uint256 repaidToken,
@@ -244,7 +293,11 @@ contract StrategyRouter is AaveModule, UniswapV4Module {
                 borrowAmountOut
             );
 
-        // 3) Mark position closed
+        // We do not currently expose `repaidToken` externally,
+        // but keeping it in the signature makes accounting auditable on-chain.
+
+        // 3) Mark position as closed; the on-chain protocols still hold state,
+        //    but from the app perspective this position should no longer be mutated.
         p.isOpen = false;
 
         // 4) Emit event
@@ -259,7 +312,9 @@ contract StrategyRouter is AaveModule, UniswapV4Module {
         );
     }
 
-    /// @dev LP 전량 제거시 토큰을 얼마 받는지 계산
+    /// @notice Convenience view:
+    ///         “If I nuke this LP right now, how many token0 / token1 do I get?”
+    /// @dev    Thin wrapper that hides PoolKey and only returns what UIs care about.
     function previewLpWithdrawAmounts(
         uint256 tokenId
     )
@@ -280,15 +335,21 @@ contract StrategyRouter is AaveModule, UniswapV4Module {
             uint256 a1
         ) = _previewLpWithdrawAmounts(tokenId);
 
-        // PoolKey 까진 안 보여줘도 되면 버리고, 주소/수량만 리턴
         token0 = t0;
         token1 = t1;
         amount0 = a0;
         amount1 = a1;
     }
 
-    /// @notice 포지션을 지금 정리(close)한다고 가정했을 때,
-    ///         LP 제거 시 받게 될 토큰 양 + Aave 빚 + 유저가 추가로 넣어야 할 B 토큰 범위를 미리보기.
+    /// @notice High-level “what if I close now?” simulator:
+    ///         - previews LP full-withdraw token amounts
+    ///         - reads current Aave debt
+    ///         - suggests a [min, max] additional borrowAsset amount the user
+    ///           should prepare in the wallet to guarantee a clean repay.
+    ///
+    /// @dev Designed for UX:
+    ///      - `minExtraFromUser`  : intuitive lower bound (shortfall after LP)
+    ///      - `maxExtraFromUser`  : strict upper bound (full debt size)
     function previewClosePosition(
         uint256 tokenId
     )
@@ -298,23 +359,23 @@ contract StrategyRouter is AaveModule, UniswapV4Module {
             address vault,
             address supplyAsset,
             address borrowAsset,
-            uint256 totalDebtToken, // 현재 Aave 빚 (borrowAsset 토큰 개수 기준)
-            uint256 lpBorrowTokenAmount, // LP 전량 제거 시 바로 얻는 borrowAsset 양
-            uint256 minExtraFromUser, // 권장 최소 추가 필요량 (보수적 기준)
-            uint256 maxExtraFromUser, // 이론상 최대 추가 필요량 (빚 전체)
-            uint256 amount0FromLp, // LP 제거 시 받는 token0 양
-            uint256 amount1FromLp // LP 제거 시 받는 token1 양
+            uint256 totalDebtToken,
+            uint256 lpBorrowTokenAmount,
+            uint256 minExtraFromUser,
+            uint256 maxExtraFromUser,
+            uint256 amount1FromLp
         )
     {
-        // 0) 포지션 메타 정보
+        // 0) Validate we are looking at a live position, but do NOT enforce owner.
+        //    Anyone can simulate; only the actual close() mutates state.
         PositionInfo storage p = positions[tokenId];
         if (!p.isOpen) revert PositionNotOpen();
-        // owner 체크는 여기선 안 함 (view 미리보기라서 누구나 볼 수 있게)
+
         vault = p.vault;
         supplyAsset = p.supplyAsset;
         borrowAsset = p.borrowAsset;
 
-        // 1) LP 전량 제거했을 때 나오는 token0/token1 양 미리보기
+        // 1) Simulate “LP full remove” at current price using our math helpers.
         PoolKey memory key;
         address token0;
         address token1;
@@ -326,13 +387,15 @@ contract StrategyRouter is AaveModule, UniswapV4Module {
             amount1FromLp
         ) = _previewLpWithdrawAmounts(tokenId);
 
-        // borrowAsset이 풀의 token0/1 중 어느 쪽인지에 따라 LP에서 나오는 "빌린 토큰" 양 계산
+        // Map LP output to borrowAsset terms where possible.
         if (borrowAsset == token0) {
             lpBorrowTokenAmount = amount0FromLp;
         } else if (borrowAsset == token1) {
             lpBorrowTokenAmount = amount1FromLp;
         } else {
-            // 이 경우는 설계상 잘못된 상태이므로, 일단 "LP로는 빚을 못 갚는다" 느낌으로 0 리턴
+            // Misconfigured position: borrowAsset not in this pool.
+            // We deliberately return a "nothing to see here" tuple instead of reverting,
+            // so callers can handle this as a “non-repayable via LP” edge case.
             totalDebtToken = 0;
             minExtraFromUser = 0;
             maxExtraFromUser = 0;
@@ -349,12 +412,12 @@ contract StrategyRouter is AaveModule, UniswapV4Module {
             );
         }
 
-        // 2) Aave variableDebtToken 기준으로 현재 빚(B 토큰 개수)을 직접 읽기
+        // 2) Read current variable debt in borrowAsset units directly from Aave.
         (, , address variableDebtToken) = DATA_PROVIDER
             .getReserveTokensAddresses(borrowAsset);
 
         if (variableDebtToken == address(0)) {
-            // 잘못된 설정 방어용
+            // Defensive guard against bad pool config.
             totalDebtToken = 0;
             minExtraFromUser = 0;
             maxExtraFromUser = 0;
@@ -373,7 +436,7 @@ contract StrategyRouter is AaveModule, UniswapV4Module {
 
         totalDebtToken = IERC20(variableDebtToken).balanceOf(vault);
 
-        // 빚이 아예 없으면, LP에서 나오는 건 전부 유저 수익
+        // If there is no debt, the entire LP output is effectively profit.
         if (totalDebtToken == 0) {
             minExtraFromUser = 0;
             maxExtraFromUser = 0;
@@ -390,32 +453,35 @@ contract StrategyRouter is AaveModule, UniswapV4Module {
             );
         }
 
-        // 3) 권장 최소/최대 추가 필요량 계산
-        //    - recommended(보수적 최소): "LP에서 나온 borrowAsset만 쓴다고 가정했을 때 부족분"
-        //    - max: 빚 전체 (슬리피지/가격 변동/스왑 손실까지 감안한 상한)
+        // 3) Translate the “debt vs LP” relation into a user-facing range:
+        //    - If LP < debt, the shortfall is what we recommend the user to top up.
+        //    - If LP >= debt, user *can* close with no extra, so minExtra=0.
         if (totalDebtToken > lpBorrowTokenAmount) {
             minExtraFromUser = totalDebtToken - lpBorrowTokenAmount;
         } else {
-            // 이미 LP만으로 빚을 다 갚거나 초과하는 상태면, 추가로 넣어야 할 최소량은 0
+            // In all cases, the hard upper bound is simply “the current debt size”.
             minExtraFromUser = 0;
         }
 
         maxExtraFromUser = totalDebtToken;
     }
 
-    /// @notice 수수료 획득
+    /// @notice Pulls Uniswap v4 fees for a given tokenId and sends them to the caller
+    ///         without touching principal (liquidity amount stays the same).
     function collectFees(
         uint256 tokenId
     ) external returns (uint256 collected0, uint256 collected1) {
-        // 1) owner 확인
+        // 1) Enforce that:
+        //      - the position is live
+        //      - the caller is the logical owner (vault owner), not necessarily the LP owner.
         PositionInfo storage p = positions[tokenId];
         if (!p.isOpen) revert PositionNotOpen();
         if (p.owner != msg.sender) revert NotPositionOwner();
 
-        // 2) key 가져오기
         PoolKey memory key = _getPoolKey();
 
-        // 3) 수수료를 유저 지갑으로 전송
+        // 2) Route protocol-level fee collection through the Uniswap module
+        //    and send proceeds directly to the user wallet.
         (collected0, collected1) = _collectFees(
             key,
             p.vault,
@@ -423,7 +489,6 @@ contract StrategyRouter is AaveModule, UniswapV4Module {
             msg.sender
         );
 
-        // 4) 이벤트 로깅
         emit FeesCollected(
             msg.sender,
             tokenId,
@@ -434,16 +499,23 @@ contract StrategyRouter is AaveModule, UniswapV4Module {
         );
     }
 
+    /// @notice Bootstraps Permit2 allowances so the router can participate in v4
+    ///         flows without spamming ERC20 approvals to PoolManager directly.
+    ///
+    /// @dev Intended to be called once per deployment (or per token pair change):
+    ///      - Router → Permit2 (max)
+    ///      - Permit2 → PoolManager (max, per token)
     function initPermit2(
         address token0,
         address token1,
         address poolManager
     ) external onlyAdmin {
-        // 1) 토큰 → Permit2 allowance
+        // 1) Grant Permit2 full allowance from the router for both tokens.
         IERC20(token0).approve(address(permit2), type(uint256).max);
         IERC20(token1).approve(address(permit2), type(uint256).max);
 
-        // 2) Permit2 내부 allowance (owner = StrategyRouter, spender = PoolManager)
+        // 2) Inside Permit2, delegate standing allowances to the PoolManager.
+        //    This keeps the approvals surface tightly scoped to a single spender.
         permit2.approve(
             token0,
             poolManager,

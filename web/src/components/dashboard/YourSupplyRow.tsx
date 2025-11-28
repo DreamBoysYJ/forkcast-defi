@@ -2,11 +2,11 @@
 "use client";
 
 export type YourSupply = {
-  symbol: string; // 예: "AAVE"
-  iconUrl?: string; // 예: "/tokens/aave.png"
-  supplied: number; // 예치 수량 (토큰)
-  suppliedUsd: number; // 예치 USD 가치
-  apy: number; // 0.03 => 3.0%
+  symbol: string; // ex: "AAVE"
+  iconUrl?: string; // ex: "/tokens/aave.png"
+  supplied: number; // supplied amounts
+  suppliedUsd: number; // supplied amounts - USD value
+  apy: number; // ex : 0.03 => 3.0%
   isCollateral: boolean;
 };
 
@@ -19,7 +19,7 @@ export function YourSupplyRow({ item }: Props) {
 
   return (
     <tr className="fc-row">
-      {/* 1) Asset (아이콘 + 심볼) */}
+      {/* 1) Asset (icon + symbol) */}
       <td className="fc-cell fc-cell-left">
         <div className="fc-asset-main">
           {iconUrl ? (
@@ -31,7 +31,7 @@ export function YourSupplyRow({ item }: Props) {
         </div>
       </td>
 
-      {/* 2) Balance (토큰 수량 + USD) */}
+      {/* 2) Balance (tokenAmount+ USD) */}
       <td className="fc-cell fc-cell-right">
         <div className="font-medium leading-tight text-slate-900">
           {supplied.toFixed(2)}

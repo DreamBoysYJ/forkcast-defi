@@ -25,9 +25,18 @@ import {TickMath} from "v4-core/src/libraries/TickMath.sol";
 
 // Hook
 import {SwapPriceLoggerHook} from "../../src/hook/SwapPriceLoggerHook.sol";
-import {Hooks} from "../../src/libs/Hooks.sol"; // 네가 복붙한 경로에 맞게
-import {HookMiner} from "../../src/libs/HookMiner.sol"; // 네 경로에 맞게
+import {Hooks} from "../../src/libs/Hooks.sol";
+import {HookMiner} from "../../src/libs/HookMiner.sol";
 
+/**
+ * @title SwapPriceLoggerHookTest
+ * @notice End-to-end tests for SwapPriceLoggerHook integrated with Uniswap v4 and MiniV4SwapRouter.
+ *         Scope:
+ *           - Deploy hook via HookMiner (CREATE2, AFTER_SWAP only)
+ *           - Initialize a pool, seed liquidity, and route swaps through MiniV4SwapRouter
+ *           - Assert that afterSwap emits SwapPriceLogged with the correct poolId
+ *           - Provide a debug helper to inspect raw logs when needed
+ */
 contract SwapPriceLoggerHookTest is Test {
     using PoolIdLibrary for PoolKey;
 
@@ -57,13 +66,13 @@ contract SwapPriceLoggerHookTest is Test {
         vm.createSelectFork(rpc);
         assertEq(block.chainid, 11155111, "not on sepolia");
 
-        // 2) 토큰 2개 (AAVE/LINK)
+        // 2) Choose underlying tokens (AAVE / LINK)
         address token0Addr = vm.envAddress("AAVE_UNDERLYING_SEPOLIA");
         address token1Addr = vm.envAddress("LINK_UNDERLYING_SEPOLIA");
         token0 = token0Addr;
         token1 = token1Addr;
 
-        // 3) Uniswap V4 기본 세팅
+        // 3) Wire up Uniswap v4 core/periphery + Permit2
         address pm = vm.envAddress("POOL_MANAGER");
         address posm = vm.envAddress("POSITION_MANAGER");
         address permit2Addr = vm.envAddress("PERMIT2");
@@ -72,33 +81,33 @@ contract SwapPriceLoggerHookTest is Test {
         positionManager = IPositionManager(posm);
         permit2 = IPermit2(permit2Addr);
 
-        // Deploy MiniV4SwapRouter
+        // 4) Deploy minimal swap router used as the entrypoint for swaps
         miniRouter = new Miniv4SwapRouter(address(poolManager));
         assertGt(address(miniRouter).code.length, 0, "miniRouter not deployed");
 
-        // 5) 훅 + 풀키 세팅
+        // 5) Deploy hook via HookMiner and build PoolKey with AFTER_SWAP flag
         (SwapPriceLoggerHook _hook, PoolKey memory key) = _deployHook();
         hook = _hook;
         poolKey = key;
 
-        // 4) admin
+        // 6) admin
         admin = makeAddr("admin");
         vm.startPrank(admin);
 
         deal(token0, admin, 1_000e18);
         deal(token1, admin, 1_000e18);
 
-        // 7) 풀 초기화
+        // 7) Initialize the pool at 1:1 price
         uint160 sqrtPriceX96 = uint160(1) << 96;
         int24 initTick = _initPool(key, sqrtPriceX96);
         console2.log("initTick :", initTick);
 
-        // 8) 틱 범위 (풀 레인지)
+        // 8) Configure full-range ticks for bootstrap liquidity
         int24 spacing = key.tickSpacing;
         int24 lower = (TickMath.MIN_TICK / spacing) * spacing;
         int24 upper = (TickMath.MAX_TICK / spacing) * spacing;
 
-        // 9) Permit2를 통한 유동성 공급
+        // 9) Add bootstrap liquidity using Permit2
         uint256 bal0Admin = IERC20(token0).balanceOf(admin);
         uint256 bal1Admin = IERC20(token1).balanceOf(admin);
 
@@ -127,9 +136,9 @@ contract SwapPriceLoggerHookTest is Test {
         vm.stopPrank();
     }
 
-    /// -------< Success Cases >--------------
+    // ============================ Success cases ============================
 
-    /// @dev 스왑하면 afterSwap 훅 이벤트가 뜨는지 확인
+    /// @dev Swap through MiniV4SwapRouter and assert that the hook emits SwapPriceLogged.
     function test_Swap_Emits_SwapPriceLogged() public {
         address trader = makeAddr("trader");
         uint256 amountIn = 10e18;
@@ -140,8 +149,8 @@ contract SwapPriceLoggerHookTest is Test {
 
         PoolId poolId = poolKey.toId();
 
-        // poolId, 이벤트 시그니처만 체크 (tick/price/timestamp는 안 봄)
-        // poolId, 시그니처만 체크하고 싶으면:
+        // Only care that the hook fires for the correct poolId and event signature;
+        // tick / price / timestamp are not asserted here.
         vm.expectEmit(true, true, false, false, address(hook));
         emit SwapPriceLogged(poolId, 0, 0, 0);
 
@@ -158,48 +167,9 @@ contract SwapPriceLoggerHookTest is Test {
         vm.stopPrank();
     }
 
-    /// -------< Helper Functions >--------------
+    // ============================ Debug helper ============================
 
-    /// @dev HookMiner를 사용해서 Hook 주소와 salt를 찾고, CREATE2로 배포 + PoolKey까지 생성
-    function _deployHook()
-        internal
-        returns (SwapPriceLoggerHook _hook, PoolKey memory key)
-    {
-        // 1) 훅 생성 코드 + 생성자 인자 준비
-        bytes memory creationCode = type(SwapPriceLoggerHook).creationCode;
-        bytes memory constructorArgs = abi.encode(address(poolManager));
-
-        // 2) 원하는 플래그로 Hook 주소 / Salt 찾기
-        (address expectedHookAddr, bytes32 salt) = HookMiner.find({
-            deployer: address(this),
-            flags: uint160(Hooks.AFTER_SWAP_FLAG),
-            creationCode: creationCode,
-            constructorArgs: constructorArgs
-        });
-
-        // 3) CREATE2로 훅 배포
-        _hook = new SwapPriceLoggerHook{salt: salt}(address(poolManager));
-
-        console2.log("EXPECTED HOOK :::", expectedHookAddr);
-        console2.log("HOOK DEPLOYED :::", address(_hook));
-
-        // 4) 테스트 환경 : deployer == address(this)
-
-        assertEq(address(_hook), expectedHookAddr, "hook address mismatch");
-
-        // 5) 이 훅 주소를 PoolKey에 세팅
-        uint24 fee = 3000;
-        int24 tickSpacing = 10;
-
-        key = _buildPoolKey(
-            token0,
-            token1,
-            fee,
-            tickSpacing,
-            IHooks(address(_hook))
-        );
-    }
-
+    /// @dev Same swap as above, but records and prints all logs for manual inspection.
     function test_Swap_Emits_SwapPriceLogged_Debug() public {
         address trader = makeAddr("trader");
         uint256 amountIn = 1e18;
@@ -238,7 +208,44 @@ contract SwapPriceLoggerHookTest is Test {
         }
     }
 
-    /// @dev 페어에 대한 PoolKey 생성
+    // ============================ Hook / pool setup ============================
+
+    /// @dev Use HookMiner to find a valid AFTER_SWAP-only hook salt, deploy via CREATE2,
+    ///      and build a PoolKey that references the deployed hook.
+    function _deployHook()
+        internal
+        returns (SwapPriceLoggerHook _hook, PoolKey memory key)
+    {
+        bytes memory creationCode = type(SwapPriceLoggerHook).creationCode;
+        bytes memory constructorArgs = abi.encode(address(poolManager));
+
+        (address expectedHookAddr, bytes32 salt) = HookMiner.find({
+            deployer: address(this),
+            flags: uint160(Hooks.AFTER_SWAP_FLAG),
+            creationCode: creationCode,
+            constructorArgs: constructorArgs
+        });
+
+        _hook = new SwapPriceLoggerHook{salt: salt}(address(poolManager));
+
+        console2.log("EXPECTED HOOK :::", expectedHookAddr);
+        console2.log("HOOK DEPLOYED :::", address(_hook));
+
+        assertEq(address(_hook), expectedHookAddr, "hook address mismatch");
+
+        uint24 fee = 3000;
+        int24 tickSpacing = 10;
+
+        key = _buildPoolKey(
+            token0,
+            token1,
+            fee,
+            tickSpacing,
+            IHooks(address(_hook))
+        );
+    }
+
+    /// @dev Build canonical PoolKey for the chosen token pair.
     function _buildPoolKey(
         address _token0,
         address _token1,
@@ -269,7 +276,7 @@ contract SwapPriceLoggerHookTest is Test {
         });
     }
 
-    /// @dev 풀 생성(Initialize) 후 초기 tick 반환
+    /// @dev Initialize a pool and return the initial tick for sanity checks.
     function _initPool(
         PoolKey memory key,
         uint160 sqrtPriceX96
@@ -278,7 +285,7 @@ contract SwapPriceLoggerHookTest is Test {
         console2.log("Initialized Tick : ", initTick);
     }
 
-    /// @dev PositionManager를 통해 유동성 공급
+    /// @dev Add liquidity via PositionManager using Permit2 as allowance manager.
     function _addLiquidity(
         PoolKey memory key,
         address provider,

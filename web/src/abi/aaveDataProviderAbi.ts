@@ -1,5 +1,3 @@
-// src/abi/aaveDataProviderAbi.ts
-
 export const aaveDataProviderAbi = [
   {
     type: "function",

@@ -7,11 +7,19 @@ import {HookMiner} from "../../src/libs/HookMiner.sol";
 
 import {SwapPriceLoggerHook} from "../../src/hook/SwapPriceLoggerHook.sol";
 
-/*
-SwapPriceLoggerHook용 유효한 SALT 찾기
-
-forge test --match-test test_swap_price_logger_hook_salt -vvv
-*/
+/**
+ * @notice Utility test to pre-compute a valid CREATE2 salt for SwapPriceLoggerHook.
+ *
+ * How to use:
+ *  - Runs HookMiner.find with AFTER_SWAP flag and the hook’s creation code.
+ *  - Prints the deployer, derived hook address, and salt to the console.
+ *  - Asserts that deploying with that salt actually produces the same address.
+ *
+ * This is a one-off helper: run it when you need a deterministic hook address
+ * for v4 pool initialization.
+ *
+ * forge test --match-test test_swap_price_logger_hook_salt -vvv
+ */
 
 contract FindSwapPriceLoggerHookSalt is Test {
     function find(
@@ -45,7 +53,7 @@ contract FindSwapPriceLoggerHookSalt is Test {
             uint160(Hooks.AFTER_SWAP_FLAG)
         );
 
-        // 이 assert가 통과하면, HookMiner가 찾은 salt로 실제 배포한 주소가 동일하다는 뜻
+        // Sanity check: deploying with the mined salt must yield the same hook address.
         assertEq(addr, address(new SwapPriceLoggerHook{salt: salt}(pm)));
     }
 }

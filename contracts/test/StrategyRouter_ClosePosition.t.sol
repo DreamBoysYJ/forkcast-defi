@@ -42,8 +42,28 @@ import {TickMath} from "v4-core/src/libraries/TickMath.sol";
 
 // Hook
 import {SwapPriceLoggerHook} from "../src/hook/SwapPriceLoggerHook.sol";
-import {HookMiner} from "../src/libs/HookMiner.sol"; // 네 경로에 맞게
-import {Hooks} from "../src/libs/Hooks.sol"; // 네가 복붙한 경로에 맞게
+import {HookMiner} from "../src/libs/HookMiner.sol";
+import {Hooks} from "../src/libs/Hooks.sol";
+
+// StrategyRouterClosePosition.t.sol
+// -----------------------------------------------------------------------------
+// Integration-style test suite for StrategyRouter close/collect flows.
+//
+// - Forks Sepolia and wires real Aave V3 + Uniswap v4 (PoolManager, PositionManager)
+// - Deploys AccountFactory, UserAccount, StrategyRouter, MiniV4SwapRouter, Permit2
+// - Deploys an AFTER_SWAP hook via HookMiner and initializes the AAVE/LINK v4 pool
+// - Bootstraps deep, wide-range LP so external swaps can accrue meaningful fees
+// - Happy paths:
+//     * openPosition: supply → borrow → Uniswap v4 LP (UserAccount as vault)
+//     * closePosition: remove LP → swap → repay Aave debt → withdraw collateral
+//     * collectFees: claim only fee portion without changing LP liquidity
+//     * previewClosePosition: estimate LP proceeds, total debt, and extra
+//       borrowAsset required from the user
+// - Guard / revert cases:
+//     * position already closed (close / previewClosePosition)
+//     * caller is not position owner (close / collectFees)
+//     * insufficient borrowAsset approved or owned by the user
+// - Also asserts hook events (SwapPriceLogged) are emitted during swaps/close.
 
 contract StrategyRouterClosePosition is Test {
     StrategyRouter public strategyRouter;
@@ -84,8 +104,8 @@ contract StrategyRouterClosePosition is Test {
         uint256 indexed tokenId,
         address supplyAsset,
         address borrowAsset,
-        uint256 amountSupplyReturned, // 유저가 최종 받는 A 수량
-        uint256 amountBorrowReturned // 유저가 최종 받는 B 수량
+        uint256 amountSupplyReturned,
+        uint256 amountBorrowReturned
     );
 
     event PositionOpened(
@@ -312,12 +332,12 @@ contract StrategyRouterClosePosition is Test {
     }
 
     function test_setUp() public pure {
-        console2.log("HI");
+        console2.log("SET UP COMPLETED ");
     }
 
-    /// -------< Succeess Cases >--------------
+    // ============================ Success cases ============================
 
-    /// @dev openPosition  호출 성공
+    /// @dev openPosition should succeed for a basic leverage LP flow.
     function test_OpenPosition_HappyPath() public {
         address user = makeAddr("user");
         uint256 supplyAmount = 100e18;
@@ -331,17 +351,16 @@ contract StrategyRouterClosePosition is Test {
         ) = _openPositionFor(user, supplyAmount);
     }
 
-    /// @dev openPosition -> (trader swap) ->  closePosition 호출 성공
+    /// @dev openPosition -> external swaps (fees) -> closePosition should fully unwind.
     function test_ClosePosition_HappyPath() public {
         // 1) Call openPosition
         address user = makeAddr("user");
         uint256 supplyAmount = 100e18;
 
-        // 유저 토큰 잔고 스냅샷 (닫기 전)
         uint256 userSupplyBefore = IERC20(address(supplyToken)).balanceOf(user);
         uint256 userBorrowBefore = IERC20(address(borrowToken)).balanceOf(user);
 
-        // 유저가 미리 borrowAsset 부족분 보유
+        // user pre-holds enough borrow asset to cover worst-case shortfall
         deal(address(borrowToken), user, 1000e18);
 
         (
@@ -464,7 +483,7 @@ contract StrategyRouterClosePosition is Test {
         vm.stopPrank();
     }
 
-    /// @dev openPosition -> (trader swap) ->  collectFee 호출 성공
+    /// @dev openPosition -> external swaps -> collectFees should pull only fees.
     function test_CollectFees_HappyPath() public {
         // 1) Call openPosition
         address user = makeAddr("user");
@@ -486,22 +505,20 @@ contract StrategyRouterClosePosition is Test {
         );
         assertGt(debtBefore, 0, "vault must have debt before close");
         assertGt(hfBefore, 0, "HF must be > 0 before close");
-        // 2) 현재 LP 유동성 스냅샷
+
         uint128 liqBefore = uniPositionManager.getPositionLiquidity(tokenId);
         assertGt(liqBefore, 0, "liquidity must be > 0 before collect");
 
-        // 2) Simulate Traders swapping in pool so LP position accures fees
+        // Simulate Traders swapping in pool so LP position accures fees
         address trader = makeAddr("trader");
         _generateFeesByExternalSwaps(trader, 10e18, 20);
 
-        // 3) Collect 전 후 잔고 비교용
         (address token0, address token1, , , , ) = strategyRouter
             .getUniswapV4PoolConfig();
 
         uint256 userToken0Before = IERC20(token0).balanceOf(user);
         uint256 userToken1Before = IERC20(token1).balanceOf(user);
 
-        // 4) 유저가 직접 collectFees 호출
         vm.startPrank(user);
         (uint256 collected0, uint256 collected1) = strategyRouter.collectFees(
             tokenId
@@ -510,14 +527,11 @@ contract StrategyRouterClosePosition is Test {
         console2.log("Collected 0 :::", collected0);
         console2.log("Collected 1 :::", collected1);
 
-        // 5) 수수료 확인     // 6) 정말 수수료가 들어왔는지 확인
-        // 최소 한 쪽 토큰이라도 수수료가 > 0 이어야 한다.
         assertGt(collected0 + collected1, 0, "must collect some fees");
 
         uint256 userToken0After = IERC20(token0).balanceOf(user);
         uint256 userToken1After = IERC20(token1).balanceOf(user);
 
-        // 수수료 = 잔고 증가량과 일치해야 함
         assertEq(
             userToken0After - userToken0Before,
             collected0,
@@ -529,7 +543,6 @@ contract StrategyRouterClosePosition is Test {
             "user token1 delta must equal collected1"
         );
 
-        // 7) collect는 "수수료만" 빼가고, LP 유동성 자체는 그대로여야 함
         uint128 liqAfter = uniPositionManager.getPositionLiquidity(tokenId);
         assertEq(
             liqAfter,
@@ -552,7 +565,7 @@ contract StrategyRouterClosePosition is Test {
         );
     }
 
-    /// @dev openPosition -> (trader swap) ->  previewClosePosition
+    /// @dev openPosition -> external swaps -> previewClosePosition sanity checks.
     function test_PreviewClosePosition_HappyPath() public {
         // 1) openPosition 으로 레버리지 LP 포지션 오픈
         address user = makeAddr("user");
@@ -571,11 +584,9 @@ contract StrategyRouterClosePosition is Test {
         assertGt(debtBefore, 0, "vault must have debt");
         assertGt(hfBefore, 0, "HF must be > 0 before close");
 
-        // 2) 트레이더 스왑으로 LP에 수수료 쌓이게 만들기
         address trader = makeAddr("trader");
         _generateFeesByExternalSwaps(trader, 10e18, 10);
 
-        // 3) previewClosePosition 호출
         (
             address vaultOut,
             address supplyAssetOut,
@@ -590,7 +601,6 @@ contract StrategyRouterClosePosition is Test {
 
         // ---------- 검증 (assert) ----------
 
-        // (1) 메타데이터 일치
         assertEq(vaultOut, vault, "preview: vault mismatch");
         assertEq(
             supplyAssetOut,
@@ -603,7 +613,6 @@ contract StrategyRouterClosePosition is Test {
             "preview: wrong borrowAsset"
         );
 
-        // (2) 빚과 관계 값들이 말이 되는지
         assertGt(totalDebtToken, 0, "preview: debt must be > 0");
 
         // min ≤ max ≤ totalDebt
@@ -644,7 +653,7 @@ contract StrategyRouterClosePosition is Test {
         console2.log("Extra B needed (max)         :", maxExtraFromUser);
     }
 
-    /// @dev collectFee 0인 경우
+    /// @dev collectFees should return zero when no swap fees accrued yet.
     function test_CollectFees_HappyPath_WhenNoFeeAccured() public {
         // 1) Call openPosition
         address user = makeAddr("user");
@@ -669,20 +678,18 @@ contract StrategyRouterClosePosition is Test {
         assertEq(collected1, 0, "fee must be 0");
     }
 
-    /// -------< Revert/Guard Cases >--------------
+    // ============================ Revert / guard cases ============================
 
-    /// @dev openPosition -> (trader swap) ->  closePosition 호출 성공 후
-    ///      이미 닫힌 포지션 재호출
+    /// @dev After closing once, calling closePosition again on same tokenId must revert.
+
     function test_ClosePosition_Revert_WhenPositionAlreadyClosed() public {
         // 1) Call openPosition
         address user = makeAddr("user");
         uint256 supplyAmount = 100e18;
 
-        // 유저 토큰 잔고 스냅샷 (닫기 전)
         uint256 userSupplyBefore = IERC20(address(supplyToken)).balanceOf(user);
         uint256 userBorrowBefore = IERC20(address(borrowToken)).balanceOf(user);
 
-        // 유저가 미리 borrowAsset 부족분 보유
         deal(address(borrowToken), user, 1000e18);
 
         (
@@ -693,11 +700,9 @@ contract StrategyRouterClosePosition is Test {
             uint256 hfBefore
         ) = _openPositionFor(user, supplyAmount);
 
-        // 2) Simulate Traders swapping in pool so LP position accures fees
         address trader = makeAddr("trader");
         _generateFeesByExternalSwaps(trader, 10e18, 10);
 
-        // 3) 미리 부족분에 대한 토큰양 확인 후 approve
         (
             ,
             ,
@@ -710,8 +715,6 @@ contract StrategyRouterClosePosition is Test {
 
         ) = strategyRouter.previewClosePosition(tokenId);
 
-        // 부족분 상한 만큼 미리 approve
-        // 유저가 부족분 상한(maxExtraFromUser)만큼 미리 approve
         vm.startPrank(user);
         IERC20(address(borrowToken)).approve(
             address(strategyRouter),
@@ -741,8 +744,7 @@ contract StrategyRouterClosePosition is Test {
         vm.stopPrank();
     }
 
-    /// @dev openPosition -> (trader swap) ->  closePosition 호출 성공 후
-    ///      이미 닫힌 포지션을 previewClosePosition 호출 시도
+    /// @dev After closing a position, previewClosePosition must also revert.
     function test_PreviewClosePosition_Revert_WhenPositionAlreadyClosed()
         public
     {
@@ -813,7 +815,7 @@ contract StrategyRouterClosePosition is Test {
         vm.stopPrank();
     }
 
-    /// @dev openPosition -> (trader swap) ->  충분한 borrowToken을 approve하지 않았을 경우
+    /// @dev If user approves less borrowToken than required, closePosition must revert.
     function test_ClosePosition_Revert_WhenUserInsufficientApproved() public {
         // 1) Call openPosition
         address user = makeAddr("user");
@@ -862,7 +864,7 @@ contract StrategyRouterClosePosition is Test {
         strategyRouter.closePosition(tokenId);
     }
 
-    /// @dev openPosition -> (trader swap) ->  충분한 borrowToken을 owner가 소유하지 못할경우
+    /// @dev If user doesn't own enough borrowToken, closePosition must revert.
     function test_ClosePosition_Revert_WhenUserHasNotEnoughBorrowedToken()
         public
     {
@@ -916,7 +918,7 @@ contract StrategyRouterClosePosition is Test {
         strategyRouter.closePosition(tokenId);
     }
 
-    /// @dev openPosition -> (trader swap) ->  다른 유저가 closePosition 호출 시도
+    /// @dev Only the position owner can call closePosition.
     function test_ClosePosition_Revert_WhenNotOwner() public {
         // 1) Call openPosition
         address user = makeAddr("user");
@@ -973,7 +975,7 @@ contract StrategyRouterClosePosition is Test {
         vm.stopPrank();
     }
 
-    /// @dev 다른 사용자가 수수료 수령 시도
+    /// @dev Only the position owner can collect fees.
     function test_CollectFees_Revert_WhenNotPositionOwner() public {
         // 1) Call openPosition
         address user = makeAddr("user");
@@ -1000,18 +1002,16 @@ contract StrategyRouterClosePosition is Test {
         );
     }
 
-    /// -------< Helper Functions >--------------
+    // ============================ Helper functions ============================
 
-    /// @dev HookMiner를 사용해서 Hook 주소와 salt를 찾고, CREATE2로 배포 + PoolKey까지 생성
+    /// @dev Use HookMiner to find a hook address with AFTER_SWAP flag, deploy via CREATE2 and build PoolKey.
     function _deployHook()
         internal
         returns (SwapPriceLoggerHook _hook, PoolKey memory key)
     {
-        // 1) 훅 생성 코드 + 생성자 인자 준비
         bytes memory creationCode = type(SwapPriceLoggerHook).creationCode;
         bytes memory constructorArgs = abi.encode(address(uniPoolManager));
 
-        // 2) 원하는 플래그로 Hook 주소 / Salt 찾기
         (address expectedHookAddr, bytes32 salt) = HookMiner.find({
             deployer: address(this),
             flags: uint160(Hooks.AFTER_SWAP_FLAG),
@@ -1019,17 +1019,14 @@ contract StrategyRouterClosePosition is Test {
             constructorArgs: constructorArgs
         });
 
-        // 3) CREATE2로 훅 배포
+        // 3) CREATE2
         _hook = new SwapPriceLoggerHook{salt: salt}(address(uniPoolManager));
 
         console2.log("EXPECTED HOOK :::", expectedHookAddr);
         console2.log("HOOK DEPLOYED :::", address(_hook));
 
-        // 4) 테스트 환경 : deployer == address(this)
-
         assertEq(address(_hook), expectedHookAddr, "hook address mismatch");
 
-        // 5) 이 훅 주소를 PoolKey에 세팅
         uint24 fee = 3000;
         int24 tickSpacing = 10;
 
@@ -1042,7 +1039,7 @@ contract StrategyRouterClosePosition is Test {
         );
     }
 
-    /// @dev user 수수료 수취 목적임의의 유저가 Swap N회 실행
+    /// @dev External trader performs N swaps to generate fees for LP.
     function _generateFeesByExternalSwaps(
         address trader,
         uint256 amountPerSwap,
@@ -1080,7 +1077,7 @@ contract StrategyRouterClosePosition is Test {
         vm.stopPrank();
     }
 
-    /// @dev openPosition 내장 함수
+    /// @dev Helper wrapper around StrategyRouter.openPosition for tests.
     function _openPositionFor(
         address user,
         uint256 supplyAmount
@@ -1149,7 +1146,7 @@ contract StrategyRouterClosePosition is Test {
         assertGt(liq, 0, "LP liquidity must be > 0");
     }
 
-    /// @dev 페어에 대한 PoolKey 생성
+    /// @dev Build a PoolKey for the given pair with address ordering.
     function _buildPoolKey(
         address _token0,
         address _token1,
@@ -1182,7 +1179,7 @@ contract StrategyRouterClosePosition is Test {
         });
     }
 
-    /// @dev 풀 생성(Initialize) 후  초기 tick 반환
+    /// @dev Initialize pool and return initial tick.
     function _initPool(
         PoolKey memory key,
         uint160 sqrtPriceX96
@@ -1191,7 +1188,7 @@ contract StrategyRouterClosePosition is Test {
         console2.log("Initialized Tick : ", initTick);
     }
 
-    /// @dev PositionManager를 통해 유동성 공급
+    /// @dev Add liquidity via PositionManager using Permit2 approvals.
     function _addLiquidity(
         PoolKey memory key,
         address provider,

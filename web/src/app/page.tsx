@@ -53,7 +53,7 @@ export default function Page() {
           Preview & run a one-shot Aave → Uniswap v4 LP strategy
         </p>
 
-        {/* 상단: 지갑 연결 + 데모 트레이더 버튼 */}
+        {/* Top : Wallet Connect + Demo Trader Button */}
         <div className="mt-6 flex gap-3">
           <Connect />
           <button
@@ -64,28 +64,29 @@ export default function Page() {
           </button>
         </div>
 
-        {/* 전략 통합 카드 (온체인 데이터로 렌더링) */}
+        {/* Event Section */}
         <HookEventSection />
+
         <section className="mt-8">
           <StrategyPositionCard />
         </section>
 
-        {/* Uniswap LP 카드 */}
+        {/* Uniswap LP Card */}
         <UniswapPositionCard />
 
-        {/* 위쪽 2개 카드 */}
+        {/* Latest 2 LP Cards only */}
         <div className="mt-6 grid gap-4 lg:grid-cols-2 lg:gap-6">
           <YourSupplyCard />
           <YourBorrowCard />
         </div>
 
-        {/* 아래쪽 2개 카드 */}
+        {/* Assets to Suppy/Borrow cards */}
         <div className="mt-1 grid gap-4 lg:grid-cols-2 lg:gap-6">
           <AssetsToSupplyCard onClickPreview={handleClickPreview} />
           <AssetsToBorrowCard />
         </div>
 
-        {/* openPosition 프리뷰 모달 */}
+        {/* openPosition preview modal */}
         <OpenPositionPreviewModal
           isOpen={isPreviewOpen}
           onClose={() => setIsPreviewOpen(false)}
@@ -94,7 +95,7 @@ export default function Page() {
           initialSupplySymbol={selectedSupplySymbol}
         />
 
-        {/* demo trader 모달 */}
+        {/* demo trader modal */}
         <DemoTraderModal
           isOpen={isDemoTraderOpen}
           onClose={() => setIsDemoTraderOpen(false)}

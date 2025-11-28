@@ -1,19 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-/**
- * AaveSepoliaProbe.t.sol
- * 목적: 세폴리아 Aave v3에서 유저의 현재 자산을 바탕으로, 예치(supply), 대출(borrow) 가능한 자산 찾기
- * - 포크 블록 최신
- * 필요 세팅 ENV (.env):
- *   SEPOLIA_RPC_URL=<https://sepolia.infura.io/v3/XXX 등>
- *   USER_ADDRESS=0x
-
- *
- * 실행:
- *   forge test -vvv
- */
-
 import "forge-std/Test.sol";
 import "forge-std/console2.sol";
 import {
@@ -50,6 +37,12 @@ interface IPoolAddressesProviderLite {
     function getPriceOracle() external view returns (address);
 }
 
+/**
+ * @dev Thin probe against live Aave V3 Sepolia.
+ *      Not a unit test – used to understand which assets are realistically
+ *      supplyable / borrowable for a given USER_ADDRESS, with the same rules
+ *      the official UI uses.
+ */
 contract AaveSepoliaProbeTest is Test {
     address private providerAddr;
     address private poolAddr;
@@ -75,7 +68,7 @@ contract AaveSepoliaProbeTest is Test {
         vm.label(address(data), "AAVE_PROTOCOL_DATA_PROVIDER");
     }
 
-    // 목적 : 예치 가능 (supplyable) 자산이면서 userAddr가 가진 자산들만 식별
+    /// @dev Log assets that are both protocol-supplyable and actually held by userAddr.
     function test_printSupplyableForUser() public view {
         console2.log("=== Aave V3 Sepolia: Supplyable Probe (latest) ===");
         console2.log("Provider:", vm.toString(providerAddr));
@@ -96,40 +89,40 @@ contract AaveSepoliaProbeTest is Test {
                 ,
                 ,
                 ,
-                bool usageAsCollateralEnabled, // 담보로 사용 되는지 여부 (담보 사용 안되도 예치가 가능할 수도 있음)
+                bool usageAsCollateralEnabled, // whether the asset can be used as collateral (supply itself may still be allowed)
                 ,
                 ,
-                bool isActive, // 리저브 활성화 여부 (false - 공급/대출 둘 다 불가)
-                bool isFrozen // 동결 상태 (새 공급/새 대출 막힘, 상환/인출만 허용)
+                bool isActive, // inactive reserves cannot be supplied or borrowed
+                bool isFrozen // frozen reserves allow repay/withdraw only
             ) = data.getReserveConfigurationData(asset);
 
             bool paused = false;
             try data.getPaused(asset) returns (bool p) {
-                // frozen은 상환/인출은 허용되는데, 이것도 막을 수 있는 긴급 스위치 체크
+                // emergency kill-switch that can block supply/borrow even if not frozen
                 paused = p;
             } catch {}
             // caps & aToken total supply
-            (, uint256 supplyCap) = data.getReserveCaps(asset); // (borrowCap, supplyCap) // 리저브 별 공급 상한
+            (, uint256 supplyCap) = data.getReserveCaps(asset); // (borrowCap, supplyCap) – per-reserve supply ceiling
             (address aTokenAddr, , ) = data.getReserveTokensAddresses(asset);
-            uint256 aTotal = aTokenAddr == address(0) // 현재 공급 내용
+            uint256 aTotal = aTokenAddr == address(0)
                 ? 0
                 : IERC20(aTokenAddr).totalSupply();
 
-            // cap 단위 보정: cap * 10**decimals 와 비교
+            // normalize cap to token units: cap * 10**decimals
             bool capOk = (supplyCap == 0) ||
                 (aTotal < supplyCap * (10 ** decimals));
 
-            // 사용자의 해당 자산 잔액
+            // user’s wallet balance for this underlying
             uint256 userBal = IERC20(asset).balanceOf(userAddr);
             bool userHas = (userBal > 0);
 
-            // 프로토콜 레벨로 가능한가?
+            // protocol-level supply allowed?
             bool protocolOk = (isActive && !isFrozen && !paused && capOk);
 
-            // 실제 UI의 Supply 버튼 ON과 동일한 조건
+            // mirrors the condition for the "Supply" button being enabled in the UI
             bool buttonOn = (protocolOk && userHas);
 
-            // === 출력: 버튼 ON인 것만 ===
+            // log only the assets that are actually supplyable for this user
             if (buttonOn) {
                 console2.log("----------------------------------------");
                 console2.log("symbol:", list[i].symbol);
@@ -145,7 +138,7 @@ contract AaveSepoliaProbeTest is Test {
             // WETH → ETH:
             // WETH: 0xC558DBdd856501FCd9aaF1E62eae57A9F0629a3c
             if (asset == 0xC558DBdd856501FCd9aaF1E62eae57A9F0629a3c) {
-                // ETH 별칭 처리: WETH 리저브 + 네이티브 잔액으로 별도 항목
+                // treat native ETH as a "virtual" supply option via the WETH reserve
 
                 uint256 userEth = userAddr.balance; // native ETH
                 bool ethButtonOn = protocolOk && (userEth > 0);
@@ -163,17 +156,17 @@ contract AaveSepoliaProbeTest is Test {
         }
     }
 
-    // 목적 : 현재 userAddr 기준으로 빌릴 수 있는 자산만 식별 ======
+    /// @dev Log assets that are currently borrowable for userAddr under Aave rules.
     function test_printBorrowableForUser() public view {
         console2.log("===Borrowable FOR USER===");
 
-        // 준비: 풀/오라클
+        // base protocol handles
         IPoolLite pool = IPoolLite(poolAddr);
         address oracleAddr = IPoolAddressesProviderLite(providerAddr)
             .getPriceOracle();
         IPriceOracleGetter oracle = IPriceOracleGetter(oracleAddr);
 
-        // 내 총 대출 여력
+        // user’s total borrow capacity in base currency units
         (, , uint256 availableBase, , , ) = pool.getUserAccountData(userAddr);
 
         IAaveProtocolDataProvider.TokenData[] memory list = data
@@ -181,7 +174,7 @@ contract AaveSepoliaProbeTest is Test {
         for (uint256 i = 0; i < list.length; i++) {
             address asset = list[i].tokenAddress;
 
-            // 프로토콜 플래그 + borrowCap
+            // protocol flags + borrowCap
             (
                 uint256 decimals,
                 ,
@@ -220,12 +213,13 @@ contract AaveSepoliaProbeTest is Test {
                 capOk);
             if (!protocolOk) continue;
 
-            // 풀 가용 유동성 (없으면 못 빌림)
+            // pool-side liquidity check: cannot borrow what the pool does not have
             (address aTokenAddr, , ) = data.getReserveTokensAddresses(asset);
             uint256 availLiquidity = IERC20(asset).balanceOf(aTokenAddr);
             if (availLiquidity == 0) continue;
 
-            // 네 대출 여력을 토큰 수량으로 환산 (UI의 "Available" 열과 동일한 개념)
+            // convert user’s residual borrow capacity into this asset’s units
+            // (matches the "Available to borrow" column in UIs)
             uint256 priceBase = oracle.getAssetPrice(asset); // base currency 단가
             if (priceBase == 0) continue;
 
@@ -234,7 +228,7 @@ contract AaveSepoliaProbeTest is Test {
                 priceBase;
             if (userAvailInAsset == 0) continue;
 
-            // 통과 → 출력
+            // asset passes all guards → effectively "Borrow" button is enabled
             console2.log("----------------------------------------");
             console2.log("symbol:", list[i].symbol);
             console2.log("asset:");

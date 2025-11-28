@@ -14,16 +14,21 @@ import {
 import {IPriceOracleGetter} from "../interfaces/aave-v3/IPriceOracleGetter.sol";
 import {IERC20Metadata} from "../interfaces/IERC20.sol";
 
+/// @title AaveModule
+/// @notice Shared Aave logic (sizing, guards, open/close flows) to be inherited by higher-level routers.
 abstract contract AaveModule {
-    // ── 기존 StrategyRouter의 상태 변수 그대로 ──
+    // ── Core configuration shared with StrategyRouter ──
     address public admin;
     IPoolAddressesProvider public immutable PROVIDER;
     AccountFactory public immutable factory;
     IAaveProtocolDataProvider public immutable DATA_PROVIDER;
     IPriceOracleGetter public immutable ORACLE;
 
+    /// @notice Global safety buffer for borrowing, in basis points (1e4).
+    /// @dev    10000 = no extra buffer, 9000 = 90% of HF-based capacity, etc.
     uint16 public safe_borrow_bps = 10000;
 
+    /// @notice Detailed quote used to explain / debug borrow sizing decisions.
     struct BorrowQuote {
         uint256 byHFToken;
         uint256 policyCappedToken;
@@ -33,7 +38,8 @@ abstract contract AaveModule {
         uint256 projectedHF1e18;
     }
 
-    // ── 기존 에러 / 이벤트 그대로 ──
+    // ── Errors & events reused by StrategyRouter ──
+
     error ZeroAddress();
     error ZeroAmount();
     error TransferFromFailed();
@@ -63,9 +69,9 @@ abstract contract AaveModule {
         _;
     }
 
-    /// @param addressesProvider Aave V3 PoolAddressesProvider (Sepolia)
-    /// @param dataProvider      AaveProtocolDataProvider (Sepolia)
-    /// @param _factory          AccountFactory
+    /// @param addressesProvider Aave V3 PoolAddressesProvider (e.g. Sepolia deployment)
+    /// @param dataProvider      AaveProtocolDataProvider for reading reserve state
+    /// @param _factory          AccountFactory used to resolve/create UserAccount vaults
     constructor(
         address addressesProvider,
         address _factory,
@@ -82,12 +88,15 @@ abstract contract AaveModule {
         factory = AccountFactory(_factory);
     }
 
-    // ── Aave 헬퍼들 그대로 ──
+    // ── Aave helpers ──
 
+    /// @dev Convenience accessor for the current Aave pool implementation.
     function _pool() internal view returns (IPool) {
         return IPool(PROVIDER.getPool());
     }
 
+    /// @dev Soft check for "paused" reserves.
+    /// @notice Uses a low-level call so it also works on deployments without `getPaused`.
     function _isReservePaused(address asset) internal view returns (bool) {
         (bool ok, bytes memory out) = address(DATA_PROVIDER).staticcall(
             abi.encodeWithSignature("getPaused(address)", asset)
@@ -98,7 +107,14 @@ abstract contract AaveModule {
         return false;
     }
 
-    /// @dev 현재 상태(담보/부채/LT/가격/데시멀/목표HF)에서 차입 가능한 토큰 수량 산출
+    /// @dev Computes borrow capacity under current account state + policy.
+    /// @param borrowAsset        Asset to borrow.
+    /// @param decBorrow          Decimals of `borrowAsset`.
+    /// @param priceBorrow        Oracle price of `borrowAsset` in Aave base currency.
+    /// @param collateralBase     Current total collateral (base units).
+    /// @param effectiveLTBps     Effective liquidation threshold in bps (weighted).
+    /// @param debtBaseBefore     Current total debt (base units).
+    /// @param targetHF1e18       Target HF (1e18 precision); higher = safer.
     function _quoteBorrowAmount(
         address borrowAsset,
         uint8 decBorrow,
@@ -112,23 +128,23 @@ abstract contract AaveModule {
             return Q;
         }
 
-        // 1) HF 목표 추가 부채(base) 역산
+        // 1) Compute HF-constrained additional debt capacity in base units.
         uint256 capacityBase = (collateralBase * effectiveLTBps * 1e18) /
             (10000 * targetHF1e18);
         uint256 byHFBase = capacityBase > debtBaseBefore
             ? (capacityBase - debtBaseBefore)
             : 0;
 
-        // 2) base -> token
+        // 2) Convert base capacity → token units.
         uint256 scaleBorrow = 10 ** uint256(decBorrow);
         Q.byHFToken = (byHFBase == 0)
             ? 0
             : (byHFBase * scaleBorrow) / priceBorrow;
 
-        // 3) 정책 버퍼
+        // 3) Apply module-level safety buffer (safe_borrow_bps).
         Q.policyCappedToken = (Q.byHFToken * uint256(safe_borrow_bps)) / 10_000;
 
-        // 4) BorrowCap / 유동성 체크
+        // 4) Enforce borrowCap and on-chain liquidity constraints.
         (uint256 borrowCap, ) = DATA_PROVIDER.getReserveCaps(borrowAsset);
         (address aToken, address sDebt, address vDebt) = DATA_PROVIDER
             .getReserveTokensAddresses(borrowAsset);
@@ -137,6 +153,7 @@ abstract contract AaveModule {
         if (sDebt != address(0)) totalDebtToken += IERC20(sDebt).totalSupply();
         if (vDebt != address(0)) totalDebtToken += IERC20(vDebt).totalSupply();
 
+        // Remaining protocol capacity under borrowCap (if any).
         if (borrowCap == 0) {
             Q.capRemainingToken = type(uint256).max;
         } else {
@@ -146,18 +163,19 @@ abstract contract AaveModule {
                 : 0;
         }
 
+        // Available liquidity held by the aToken (reserve cash).
         Q.poolLiquidityToken = (aToken == address(0))
             ? 0
             : IERC20(borrowAsset).balanceOf(aToken);
 
-        // 5) 최종 min
+        // 5) Final borrow size is the min across policy, caps, and liquidity.
         Q.finalToken = Q.policyCappedToken;
         if (Q.finalToken > Q.capRemainingToken)
             Q.finalToken = Q.capRemainingToken;
         if (Q.finalToken > Q.poolLiquidityToken)
             Q.finalToken = Q.poolLiquidityToken;
 
-        // 6) 예상 HF
+        // 6) Project HF after borrowing Q.finalToken.
         if (Q.finalToken == 0) {
             Q.projectedHF1e18 = 0;
         } else {
@@ -170,7 +188,7 @@ abstract contract AaveModule {
         }
     }
 
-    /// @dev Aave에서 해당 자산을 빌릴 수 있는지 현재 풀 체크
+    /// @dev Returns true if the reserve is currently borrowable under Aave config + pause flags.
     function _aaveCanBorrow(address asset) internal view returns (bool) {
         if (asset == address(0)) revert ZeroAddress();
 
@@ -194,7 +212,7 @@ abstract contract AaveModule {
             !_isReservePaused(asset);
     }
 
-    /// @dev Aave에서 해당 자산을 예치할 수 있는지 현재 풀 체크
+    /// @dev Returns true if the reserve is currently acceptable as collateral and active.
     function _aaveCanSupply(address asset) internal view returns (bool) {
         if (asset == address(0)) revert ZeroAddress();
 
@@ -218,8 +236,9 @@ abstract contract AaveModule {
             !_isReservePaused(asset);
     }
 
-    // ── admin 관련 함수도 그대로 ──
+    // ── Admin controls ──
 
+    /// @notice Updates the module admin.
     function changeAdmin(address newAdmin) external onlyAdmin {
         if (newAdmin == address(0)) revert ZeroAddress();
         if (newAdmin == admin) revert SameAddress();
@@ -228,6 +247,7 @@ abstract contract AaveModule {
         emit AdminChanged(prev, newAdmin);
     }
 
+    /// @notice Adjusts the global safety factor applied on top of HF-based borrow size.
     function setSafeBorrowBfs(uint16 newBps) external onlyAdmin {
         if (newBps > 10000) revert InvalidBps();
         if (newBps == safe_borrow_bps) revert SameValue();
@@ -237,7 +257,10 @@ abstract contract AaveModule {
         emit SafeBorrowBpsUpdated(prev, newBps, msg.sender);
     }
 
-    // ── previewBorrow도 그대로 (Router에서 상속받아 사용) ──
+    // ── previewBorrow: shared quote logic used by the router ──
+
+    /// @notice Simulates supply + borrow to show the user expected borrow size and HF.
+    /// @dev    Intended for front-end previews; does not mutate state.
     function previewBorrow(
         address user,
         address supplyAsset,
@@ -261,24 +284,25 @@ abstract contract AaveModule {
             uint256 ltAfterBps
         )
     {
-        // 0) 기본값
+        // 0) Default target HF if not provided (acts as a "safety profile").
         if (targetHF1e18 == 0) {
             targetHF1e18 = 135e16;
         }
         if (supplyAmount == 0) revert ZeroAmount();
 
-        // 1) 현재 금고 조회
+        // 1) Read current vault account data if it exists.
         address vault = factory.accountOf(user);
         if (vault != address(0)) {
             (collBeforeBase, debtBeforeBase, , ltBeforeBps, , ) = _pool()
                 .getUserAccountData(vault);
         } else {
-            // 첫 사용자
+            // First-time user: treat as empty account.
             collBeforeBase = 0;
             debtBeforeBase = 0;
             ltBeforeBps = 0;
         }
-        // 2) supply 가능 여부 체크
+
+        // 2) Early exit if this asset is not currently acceptable as collateral.
         if (!_aaveCanSupply(supplyAsset)) {
             return (
                 0,
@@ -295,18 +319,18 @@ abstract contract AaveModule {
             );
         }
 
-        // 3) 오라클/데시멀
+        // 3) Pull oracle prices and decimals.
         uint8 decSupply = IERC20Metadata(supplyAsset).decimals();
         uint8 decBorrow = IERC20Metadata(borrowAsset).decimals();
 
         uint256 priceSupply = ORACLE.getAssetPrice(supplyAsset);
         uint256 priceBorrow = ORACLE.getAssetPrice(borrowAsset);
         if (priceSupply == 0 || priceBorrow == 0) {
-            // 오라클 가격 에러
+            // If either price is zero, treat as non-borrowable in preview.
             return (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
         }
 
-        // 4) 공급 반영 (가치 가중 LT)
+        // 4) Simulate adding the new supply and recompute effective LT.
         uint256 scaleSupply = 10 ** uint256(decSupply);
         uint256 supplyValueBase = (supplyAmount * priceSupply) / scaleSupply;
         collAfterBase = collBeforeBase + supplyValueBase;
@@ -323,7 +347,7 @@ abstract contract AaveModule {
                 collAfterBase;
         }
 
-        // 5) borrow 가능 여부 (조기 컷)
+        // 5) Early exit if borrowing is disabled or unsafe for this asset.
         if (!_aaveCanBorrow(borrowAsset)) {
             return (
                 0,
@@ -340,7 +364,7 @@ abstract contract AaveModule {
             );
         }
 
-        // 6) 공통화: 차입 사이징 한 방에 계산
+        // 6) Use shared borrow sizing logic.
         BorrowQuote memory Q = _quoteBorrowAmount(
             borrowAsset,
             decBorrow,
@@ -351,7 +375,7 @@ abstract contract AaveModule {
             targetHF1e18
         );
 
-        // 7) 결과 매핑해서 리턴
+        // 7) Map quote fields to the return tuple.
         byHFToken = Q.byHFToken;
         policyMaxToken = Q.policyCappedToken;
         capRemainingToken = Q.capRemainingToken;
@@ -360,50 +384,53 @@ abstract contract AaveModule {
         projectedHF1e18 = Q.projectedHF1e18;
     }
 
-    /// @dev Aave 예치 + 차입 + 금고→라우터 토큰 이동까지 처리 (Uniswap은 관여 X)
+    /// @dev Core "open Aave position" flow:
+    ///      - transfer collateral from user to vault via router
+    ///      - supply to Aave
+    ///      - size and execute borrow
+    ///      - pull borrowed tokens back into the router as operator
     function _openAavePosition(
         address user,
         address supplyAsset,
         uint256 supplyAmount,
         address borrowAsset,
-        uint256 targetHF1e18 // 0이면 1.35e18로 처리
+        uint256 targetHF1e18 // if 0, defaults to 1.35e18
     ) internal returns (address userAccount, uint256 borrowedAmount) {
         if (supplyAsset == address(0)) revert ZeroAddress();
         if (borrowAsset == address(0)) revert ZeroAddress();
         if (supplyAmount == 0) revert ZeroAmount();
         if (targetHF1e18 == 0) targetHF1e18 = 135e16; // 1.35e18
 
-        // user vault 주소 가져오기
         userAccount = factory.getOrCreate(user);
 
-        // supply asset 현재 pool 상태 체크
+        // Check that the collateral asset is supplyable right now.
         if (!_aaveCanSupply(supplyAsset)) {
             revert SupplyingDisabled();
         }
 
-        // user -> router : 담보 토큰 가져오기 (사전 approve 필요)
+        // Pull collateral from user → router (user must have approved `supplyAsset`).
         if (
             !IERC20(supplyAsset).transferFrom(user, address(this), supplyAmount)
         ) {
             revert TransferFromFailed();
         }
 
-        // router -> userAccount : 담보 입금
+        // Forward collateral from router → vault.
         if (!IERC20(supplyAsset).transfer(userAccount, supplyAmount)) {
             revert TransferFailed();
         }
 
-        // userAccount -> aave : supply
+        // Vault supplies collateral into Aave.
         UserAccount(userAccount).supply(supplyAsset, supplyAmount);
 
-        // ---- HF-우선 사이징 ----
+        // ---- Borrow sizing with HF-first policy ----
 
-        // 대출 자산 상태 플래그 체크 (pause/freeze/enable)
+        // Early validation for the borrow asset (paused/frozen/disabled).
         if (!_aaveCanBorrow(borrowAsset)) {
             revert BorrowingDisabled();
         }
 
-        // 공급 반영된 최신 계정 상태
+        // Fresh account data after the supply above.
         (
             uint256 totalCollateralBase,
             uint256 totalDebtBase,
@@ -413,12 +440,12 @@ abstract contract AaveModule {
 
         ) = _pool().getUserAccountData(userAccount);
 
-        // 가격/decimals
+        // Token decimals and oracle price for the borrow asset.
         uint8 decBorrow = IERC20Metadata(borrowAsset).decimals();
         uint256 priceBorrow = ORACLE.getAssetPrice(borrowAsset);
         if (priceBorrow == 0) revert OraclePriceZero();
 
-        // 현재 상태에서 목표 HF를 위해 차입 가능한 토큰 양 산출
+        // Compute safe borrow size under HF, caps, and liquidity.
         BorrowQuote memory Q = _quoteBorrowAmount(
             borrowAsset,
             decBorrow,
@@ -429,32 +456,35 @@ abstract contract AaveModule {
             targetHF1e18
         );
 
-        // 8) 이유별 가드
+        // Validate reason for refusal if borrow ends up zero.
         if (Q.capRemainingToken == 0) revert BorrowCapExceeded();
         if (Q.poolLiquidityToken == 0) revert InsufficientLiquidity();
         if (Q.finalToken == 0) revert ZeroBorrowAfterSafety();
 
-        // 9) 차입 실행
+        // Execute borrow via the vault.
         UserAccount(userAccount).borrow(borrowAsset, Q.finalToken);
 
-        // 10) 금고 -> 라우터 토큰 가져오기
+        // Pull borrowed tokens from vault → router, so router can route into LP, swaps, etc.
         UserAccount(userAccount).pullToOperator(borrowAsset, Q.finalToken);
 
         borrowedAmount = Q.finalToken;
     }
 
-    /// @dev 아베 borrow한 토큰 repay + 예치한 토큰 out
-    /// @param user         포지션 소유자 (msg.sender)
-    /// @param vault        UserAccount(금고) 주소
-    /// @param supplyAsset  Aave에 예치한 담보 자산
-    /// @param borrowAsset  Aave에서 빌린 자산 (Uniswap 풀의 token0 또는 token1)
-    /// @param borrowAmountOut Uni V4 LP close 후, "LP/스왑으로부터" 라우터가 받았다고 예상한 borrowAsset 양
+    /// @dev Closes the Aave leg:
+    ///      - repay debt using router-held `borrowAsset` (including LP proceeds + leftovers)
+    ///      - withdraw all collateral back to the user
+    ///      - forward any excess `borrowAsset` (profit/leftovers) to the user
+    /// @param user            Position owner (expected caller at router level).
+    /// @param vault           UserAccount (vault) address.
+    /// @param supplyAsset     Collateral asset previously supplied to Aave.
+    /// @param borrowAsset     Debt asset borrowed from Aave.
+    /// @param borrowAmountOut Expected amount of `borrowAsset` router got from LP close.
     function _closeAavePosition(
         address user,
         address vault,
         address supplyAsset,
         address borrowAsset,
-        uint256 borrowAmountOut // Uni V4 LP Close 후 라우터의 borrowAsset의 양 (from LP)
+        uint256 borrowAmountOut
     )
         internal
         returns (
@@ -467,16 +497,17 @@ abstract contract AaveModule {
         if (supplyAsset == address(0)) revert ZeroAddress();
         if (borrowAsset == address(0)) revert ZeroAddress();
 
-        // 0) 라우터가 현재 들고 있는 borrowAsset (LP + 이전 잔여 포함)
+        // 0) Router's current `borrowAsset` balance (from LP + potential leftovers).
         uint256 routerBal = IERC20(borrowAsset).balanceOf(address(this));
         if (routerBal == 0 && borrowAmountOut == 0) {
-            // LP에서 아무것도 못 받았고, 라우터에 남은 borrowAsset도 하나도 없음
+            // No proceeds from LP and no residual balance on the router.
+            // At this point there is nothing to repay with, so treat as invalid close attempt.
             revert ZeroBorrowAfterSafety();
         }
 
         // -------- Repay Debt --------
 
-        // 1) 현재 정확한 빚 (variableDebt 기준)
+        // 1) Compute the exact outstanding debt (principal + interest) from Aave's debt token.
         uint256 debtToken = _getExactDebtToken(vault, borrowAsset);
 
         uint256 collateralAmt;
@@ -500,31 +531,26 @@ abstract contract AaveModule {
             return (actualRepaid, collateralOut, leftovevrBorrow);
         }
 
-        // 2) 라우터 잔고만으로 빚을 다 못 갚는 경우, user 지갑에서 부족분 끌어오기
-        //    -> user는 미리 borrowAsset.approve(router, maxExtraFromUser) 해둔 상태여야 함.
+        // 2) If current router balance is not enough to fully repay, pull the shortfall from the user.
+        //    The user must have pre-approved `borrowAsset` to the router.
         if (routerBal < debtToken) {
             uint256 shortfall = debtToken - routerBal;
 
-            // 여기서 transferFrom이 revert 나면, "추가로 넣어라"는 프론트 메시지대로
-            // 유저가 충분히 approve/잔고를 안 준비한 상태인 거라 자연스럽게 실패.
+            // If this transferFrom fails, it naturally reflects that the user did not
+            // provide enough funds/approval, and the close operation reverts.
             IERC20(borrowAsset).transferFrom(user, address(this), shortfall);
 
-            // 이제 라우터는 debtToken 이상을 보유하게 됨
             routerBal += shortfall;
         }
 
-        // 여기 도달 시점에서는 routerBal >= debtToken 이 보장
-        // (부족하면 위 transferFrom에서 revert 났을 것)
-        // 필요 이상으로 들어온 borrowAsset(유저가 많이 넣었거나, LP profit)은 나중에 유저에게 다시 보내줌
-
-        // 3) Router -> Vault로 빚만큼 보내고, Vault에서 repay
+        // 3) Router → vault for the exact debt amount, then vault repays Aave.
         IERC20(borrowAsset).transfer(vault, debtToken);
         UserAccount(vault).repay(borrowAsset, debtToken);
         actualRepaid = debtToken;
 
         // -------- Withdraw Collateral --------
 
-        // 4) Vault가 들고 있던 담보(예치 자산) 전부 user에게 출금
+        // 4) Withdraw the entire collateral position from the vault back to the user.
         collateralAmt = _getExactCollateralToken(vault, supplyAsset);
         if (collateralAmt > 0) {
             collateralOut = UserAccount(vault).withdrawTo(
@@ -534,16 +560,16 @@ abstract contract AaveModule {
             );
         }
 
-        // -------- Collect Fees / Profit --------
+        // -------- Collect fees / profit --------
 
-        // 5) repay 이후 라우터가 여전히 들고 있는 borrowAsset 잔고 = 수익/잔여분
+        // 5) Any `borrowAsset` left on the router now represents profit / leftovers; forward to user.
         leftovevrBorrow = IERC20(borrowAsset).balanceOf(address(this));
         if (leftovevrBorrow > 0) {
             IERC20(borrowAsset).transfer(user, leftovevrBorrow);
         }
     }
 
-    /// @dev borrowAsset의 현재 빚(원금 + 이자) 계산
+    /// @dev Reads current variable debt (principal + interest) from the Aave debt token.
     function _getExactDebtToken(
         address vault,
         address borrowAsset
@@ -554,7 +580,7 @@ abstract contract AaveModule {
         return IERC20(variableDebtTokenAddress).balanceOf(vault);
     }
 
-    /// @dev supplyAsset의 현재 예치(원금 + 이자) 계산
+    /// @dev Reads current collateral balance (principal + yield) via the aToken.
     function _getExactCollateralToken(
         address vault,
         address supplyAsset

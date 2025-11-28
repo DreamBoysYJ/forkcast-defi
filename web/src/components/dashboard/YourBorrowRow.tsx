@@ -1,12 +1,12 @@
 "use client";
 
 export type YourBorrow = {
-  symbol: string; // 예: "WBTC"
-  iconUrl?: string; // 예: "/tokens/wbtc.png"
+  symbol: string; // ex: "WBTC"
+  iconUrl?: string; // ex: "/tokens/wbtc.png"
   debtToken: number;
-  debtUsd: number; // 총 대출 USD
-  borrowApy: number; // 0.05 -> 5.0%
-  borrowPowerUsed: number; // 0.006 -> 0.6%
+  debtUsd: number; // total borrowed USD
+  borrowApy: number; // ex : 0.05 -> 5.0%
+  borrowPowerUsed: number; // ex :  0.006 -> 0.6%
 };
 
 type Props = {
@@ -19,7 +19,7 @@ export function YourBorrowRow({ item }: Props) {
 
   return (
     <tr className="fc-row">
-      {/* 1) Asset (아이콘 + 심볼) */}
+      {/* 1) Asset (icon + symbol) */}
       <td className="fc-cell fc-cell-left">
         <div className="fc-asset-main">
           {iconUrl ? (
@@ -31,7 +31,7 @@ export function YourBorrowRow({ item }: Props) {
         </div>
       </td>
 
-      {/* 2) Debt (총 대출 USD) */}
+      {/* 2) Debt (total borrowed USD) */}
       <td className="fc-cell fc-cell-right">
         <div className="font-medium text-slate-900 leading-tight">
           {debtToken.toFixed(2)}

@@ -47,6 +47,22 @@ import {IPermit2} from "v4-periphery/lib/permit2/src/interfaces/IPermit2.sol";
 import {Actions} from "v4-periphery/src/libraries/Actions.sol";
 import {TickMath} from "v4-core/src/libraries/TickMath.sol";
 
+/**
+ * @notice Console-only integration probe for the full Forkcast pipeline on Sepolia.
+ *
+ * Wiring:
+ *  - Fork Sepolia Aave V3 + Uniswap v4 (PoolManager, PositionManager, Permit2).
+ *  - Deploy StrategyRouter + StrategyLens against real protocol addresses.
+ *  - Bootstrap a wide Uniswap v4 pool and a “demo” LP position.
+ *
+ * Tests:
+ *  - Open one leveraged position through StrategyRouter.
+ *  - Read everything back via StrategyLens (Aave overview, per-reserve view, v4 LP view).
+ *  - Dump results to console for manual inspection / dashboard design.
+ *
+ * This is intentionally more of a “live playground” than a strict unit test:
+ * break-glass debugging and data-shaping for the frontend.
+ */
 contract StrategyLensConsoleTest is Test {
     using PoolIdLibrary for PoolKey;
 
@@ -81,6 +97,12 @@ contract StrategyLensConsoleTest is Test {
     address internal admin;
 
     // ========================= setUp =========================
+    /**
+     * @dev Full on-chain wiring on a Sepolia fork:
+     *  - pull all required protocol addresses from env
+     *  - deploy mini swap router, hook, factory, strategy router, lens
+     *  - initialize a wide Uniswap v4 pool and bootstrap admin LP
+     */
     function setUp() public {
         // 1) Fork Sepolia
         string memory rpc = vm.envString("SEPOLIA_RPC_URL");
@@ -251,7 +273,9 @@ contract StrategyLensConsoleTest is Test {
 
     // ========================= Lens console tests =========================
 
-    /// @dev Aave 전체 개요 + 리저브 메타데이터 찍기
+    /// @dev Open a position and dump:
+    ///      - high-level Aave account overview
+    ///      - first few reserve static configs
     function test_Lens_UserAaveOverview_And_AllReserves() public {
         address user = makeAddr("user");
         uint256 supplyAmount = 100e18;
@@ -294,7 +318,9 @@ contract StrategyLensConsoleTest is Test {
         }
     }
 
-    /// @dev 유저 리저브별 포지션 + Uniswap 포지션 view
+    /// @dev Open a position and inspect:
+    ///      - per-reserve balances (aToken / stable / variable debt)
+    ///      - corresponding Uni v4 LP snapshot
     function test_Lens_UserReservePositions_And_UniPosition() public {
         address user = makeAddr("user");
         uint256 supplyAmount = 100e18;
@@ -338,7 +364,8 @@ contract StrategyLensConsoleTest is Test {
         assertGt(uniView.liquidity, 0, "uni liquidity must be > 0");
     }
 
-    /// @dev StrategyPositionView 한 방에 조회해서 전체 전략 상태 콘솔로 보기
+    /// @dev End-to-end “strategy position” snapshot:
+    ///      single call that stitches core metadata + Uni v4 + Aave account view.
     function test_Lens_StrategyPositionView_Console() public {
         address user = makeAddr("user");
         uint256 supplyAmount = 100e18;
@@ -386,6 +413,8 @@ contract StrategyLensConsoleTest is Test {
         assertGt(v.liquidity, 0);
     }
 
+    /// @dev Dump all reserve rate data (liquidity + borrow rates) for quick sanity checks.
+
     function test_Lens_AllReserveRates_Console() public {
         StrategyLens.ReserveRateData[] memory rates = strategyLens
             .getAllReserveRates();
@@ -408,7 +437,8 @@ contract StrategyLensConsoleTest is Test {
 
     // ========================= Helper functions =========================
 
-    /// @dev HookMiner 사용해서 훅+salt 찾고 배포 + PoolKey 생성
+    /// @dev Use HookMiner to find a valid salt for AFTER_SWAP hook, then deploy
+    ///      SwapPriceLoggerHook and build a PoolKey wired to that hook.
     function _deployHook()
         internal
         returns (SwapPriceLoggerHook _hook, PoolKey memory key)
@@ -439,7 +469,10 @@ contract StrategyLensConsoleTest is Test {
         );
     }
 
-    /// @dev openPosition 한 번 열어주는 헬퍼 (니 기존 테스트에서 가져온 버전)
+    /// @dev Helper that:
+    ///      - creates a new vault for `user`
+    ///      - opens a leveraged position via StrategyRouter
+    ///      - returns vault address, new LP tokenId and basic Aave account data
     function _openPositionFor(
         address user,
         uint256 supplyAmount
@@ -500,7 +533,7 @@ contract StrategyLensConsoleTest is Test {
         assertGt(liq, 0, "LP liquidity must be > 0");
     }
 
-    /// @dev PoolKey 생성
+    /// @dev Build a canonical PoolKey for the (token0, token1, fee, spacing, hooks) pair.
     function _buildPoolKey(
         address _token0,
         address _token1,
@@ -531,7 +564,7 @@ contract StrategyLensConsoleTest is Test {
         });
     }
 
-    /// @dev 풀 init
+    /// @dev Initialize the v4 pool on the PoolManager.
     function _initPool(
         PoolKey memory key,
         uint160 sqrtPriceX96
@@ -539,7 +572,7 @@ contract StrategyLensConsoleTest is Test {
         initTick = uniPoolManager.initialize(key, sqrtPriceX96);
     }
 
-    /// @dev PositionManager로 유동성 공급
+    /// @dev Add liquidity through PositionManager using Permit2-based allowances.
     function _addLiquidity(
         PoolKey memory key,
         address provider,

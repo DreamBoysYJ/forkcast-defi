@@ -17,7 +17,7 @@ import { CollectFeesModal } from "../modals/CollectFeesModal";
 import { useUserUniPositions } from "@/hooks/useUserUniPositions";
 import { strategyRouterContract } from "@/lib/contracts";
 
-// LP 테이블용 토큰 메타
+// Token Metadata for LP table
 const TOKEN_META: Record<
   string,
   { symbol: string; icon: string; decimals: number }
@@ -46,10 +46,10 @@ function getTokenMeta(addr: `0x${string}` | undefined) {
 }
 
 /**
- * amount: bigint (보통 18자리)
- * minFrac / maxFrac 으로 소수 자릿수 범위 조절
+ * amount: bigint (18 decs normally)
+ * minFrac / maxFrac -  controls the decimal precision range
  * - LP amount: (2, 2)
- * - 이번에 모인 수수료: (0, 18)
+ * - fees collected so far: (0, 18)
  */
 function formatTokenAmount(
   amount: bigint,
@@ -92,20 +92,20 @@ export function UniswapPositionCard() {
   const [isCollectOpen, setIsCollectOpen] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
 
-  // StrategyLens 원시 포지션 → 테이블 데이터로 변환
+  // StrategyLens raw position data → Table data
   const rows: UniPositionRowData[] =
     positions
       ?.map((pos, idx) => {
         const idBig = tokenIds?.[idx] ?? BigInt(idx);
 
-        // amount0Now, amount1Now 둘 다 0이면 "실질적으로 없는 포지션" → 테이블에서 숨김
+        // amount0Now, amount1Now both 0 -> hide position from table
         const isEmptyPosition = pos.amount0Now === 0n && pos.amount1Now === 0n;
         if (isEmptyPosition) return null;
 
         const meta0 = getTokenMeta(pos.token0);
         const meta1 = getTokenMeta(pos.token1);
 
-        // LP amounts(왼쪽) 은 2자리까지만
+        // LP amounts(left) : 2
         const amount0Label = `${meta0.symbol} ${formatTokenAmount(
           pos.amount0Now,
           meta0.decimals,
@@ -141,7 +141,7 @@ export function UniswapPositionCard() {
     setIsCollectOpen(true);
   };
 
-  // 1️⃣ 미리보기(시뮬레이션) – 모달에서 "Preview fees" 눌렀을 때
+  // preview(simulation) – when click "Preview fees" in modal
   const handlePreviewCollect = async (): Promise<CollectedFees> => {
     if (!selectedPosition) {
       return {
@@ -154,7 +154,7 @@ export function UniswapPositionCard() {
     try {
       const tokenIdBig = BigInt(selectedPosition.tokenId);
 
-      // selectedPosition.tokenId 에 해당하는 원시 포지션 찾기
+      // 1) finds position corresponding to selectedPosition.tokenId
       const idx =
         tokenIds?.findIndex((id) => Number(id) === selectedPosition.tokenId) ??
         -1;
@@ -190,7 +190,7 @@ export function UniswapPositionCard() {
     }
   };
 
-  // 2️⃣ 실제 collect 실행 – 모달에서 "Collect fees" 눌렀을 때
+  // 2) execute collectFees – when clicks "Collect fees" in modal
   const handleExecuteCollect = async (): Promise<void> => {
     if (!selectedPosition) return;
     setIsProcessing(true);
@@ -208,7 +208,7 @@ export function UniswapPositionCard() {
 
       await waitForTransactionReceipt(wagmiConfig, { hash });
 
-      // 필요하면 여기서 Uniswap 포지션 리스트 refetch 트리거
+      // TODO : trigger refetch uni position lists if needed
     } finally {
       setIsProcessing(false);
     }

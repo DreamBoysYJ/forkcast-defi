@@ -10,7 +10,7 @@ type Props = {
   onClickPreview?: (symbol: string) => void;
 };
 
-// 심볼 → 아이콘 매핑 (필요한 만큼만 추가)
+// symbol -> icon mapping
 const ICON_MAP: Record<string, string> = {
   AAVE: "/tokens/aave.png",
   USDC: "/tokens/usdc.png",
@@ -24,18 +24,19 @@ const ICON_MAP: Record<string, string> = {
 };
 
 export function AssetsToSupplyCard({ onClickPreview }: Props) {
-  // 1) Lens에서 데이터 읽어오기
+  // 1) read data from Lens
   const { rows, isLoading, isError } = useAaveSupplyAssets();
 
-  // 2) useAaveSupplyAssets에서 받은 rows → 기존 SupplyAsset 타입으로 변환
+  // 2) useAaveSupplyAssets : rows → SupplyAsset type
   const assets: SupplyAsset[] = rows.map((r) => ({
     symbol: r.symbol,
     iconUrl: ICON_MAP[r.symbol] ?? "/tokens/default.png",
-    supplied: r.balance, // 토큰 수량
-    suppliedUsd: r.usdValue, // TODO: 나중에 오라클 붙여서 달러로 계산
-    apy: r.apyPercent / 100, // 3.0% → 0.03 형태로 맞추기
+    supplied: r.balance, // tokenAmount
+    suppliedUsd: r.usdValue,
+    apy: r.apyPercent / 100, // 3.0% → 0.03
     canBeCollateral: r.isCollateral,
-    // 전략에 쓰는 자산만 true로 표시하고 싶으면 조건 넣기
+    // only AAVE is available now
+    // TODO : every assets could be true
     isStrategyAsset: r.symbol === "AAVE",
   }));
 
