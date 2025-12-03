@@ -26,10 +26,12 @@ Forkcast DeFi는 다음 플로우를 구현한 **원샷(One-shot) DeFi 전략 �
 
 ---
 
-## 2. Live Demo & 발표 영상 (먼저 시청해 주세요!)
+## 2. Live Demo & 발표 영상 (한국어 자막 O) (먼저 시청해 주세요!)
 
 - 🔗 **Live dApp**: <https://forkcast-web-799298411936.asia-northeast3.run.app/>
-- 🎥 **YouTube**: <https://www.youtube.com/watch?v=YOUR_VIDEO_ID>
+- 🎥 **YouTube**: <https://youtu.be/3bI2R2cJe6c?si=HLHtmrSIzuoiiXxS>
+
+App을 사용하기 위해선 ETH와 Aave에서 만든 토큰들이 필요합니다.
 
 - **Aave Sepolia Faucet** : <https://gho.aave.com/faucet/>
 - **Sepolia ETH Faucet** : <https://sepolia-faucet.pk910.de/>

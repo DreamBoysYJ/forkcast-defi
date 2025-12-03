@@ -29,7 +29,9 @@ This repo is a monorepo with:
 ## 2. Live Demo & Presentation Video <-- Please Watch this first!
 
 - 🔗 **Live dApp**: <https://forkcast-web-799298411936.asia-northeast3.run.app/>
-- 🎥 **YouTube**: <https://www.youtube.com/watch?v=YOUR_VIDEO_ID>
+- 🎥 **YouTube**: <https://youtu.be/3bI2R2cJe6c?si=HLHtmrSIzuoiiXxS>
+
+You must prepare some ETH and ERC-20 tokens that Aave protocol created.
 
 - **Aave Sepolia Faucet** : <https://gho.aave.com/faucet/>
 - **Sepolia ETH Faucet** : <https://sepolia-faucet.pk910.de/>
