@@ -26,7 +26,7 @@ This repo is a monorepo with:
 
 ---
 
-## 2. Live Demo & Presentation Video <-- Please Watch this first!
+## 2. Live Demo & Presentation Video (Eng sub o) <-- Please Watch this first!
 
 - 🔗 **Live dApp**: <https://forkcast-web-799298411936.asia-northeast3.run.app/>
 - 🎥 **YouTube**: <https://youtu.be/3bI2R2cJe6c?si=HLHtmrSIzuoiiXxS>
