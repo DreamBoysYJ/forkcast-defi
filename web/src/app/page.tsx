@@ -9,11 +9,13 @@ import { YourSupplyCard } from "@/components/dashboard/YourSupplyCard";
 import { YourBorrowCard } from "@/components/dashboard/YourBorrowCard";
 import { UniswapPositionCard } from "@/components/dashboard/UniswapPositionCard";
 import { StrategyPositionCard } from "@/components/dashboard/strategy/StrategyPositionCard";
+import { PositionActivitySection } from "@/components/dashboard/strategy/PositionActivitySection";
 import {
   AssetOption,
   OpenPositionPreviewModal,
 } from "@/components/modals/OpenPositionPreviewModal";
 import { DemoTraderModal } from "@/components/modals/DemoTraderModal";
+import { AllPositionsModal } from "@/components/modals/AllPositionsModal";
 
 import { useState } from "react";
 import { HookEventSection } from "@/components/dashboard/HookEventSection";
@@ -24,6 +26,7 @@ export default function Page() {
     string | undefined
   >(undefined);
   const [isDemoTraderOpen, setIsDemoTraderOpen] = useState(false);
+  const [isAllPositionsOpen, setIsAllPositionsOpen] = useState(false);
 
   const supplyOptions: AssetOption[] = [
     {
@@ -53,14 +56,22 @@ export default function Page() {
           Preview & run a one-shot Aave → Uniswap v4 LP strategy
         </p>
 
-        {/* Top : Wallet Connect + Demo Trader Button */}
-        <div className="mt-6 flex gap-3">
-          <Connect />
+        {/* Top : 왼쪽 Connect/Demo, 오른쪽 All Positions */}
+        <div className="mt-6 flex items-center justify-between">
+          <div className="flex gap-3">
+            <Connect />
+            <button
+              className="border rounded px-3 py-2"
+              onClick={() => setIsDemoTraderOpen(true)}
+            >
+              Run demo trader
+            </button>
+          </div>
           <button
-            className="border rounded px-3 py-2"
-            onClick={() => setIsDemoTraderOpen(true)}
+            className="border rounded px-3 py-2 text-sm"
+            onClick={() => setIsAllPositionsOpen(true)}
           >
-            Run demo trader
+            View all positions
           </button>
         </div>
 
@@ -69,6 +80,7 @@ export default function Page() {
 
         <section className="mt-8">
           <StrategyPositionCard />
+          <PositionActivitySection />
         </section>
 
         {/* Uniswap LP Card */}
@@ -99,6 +111,12 @@ export default function Page() {
         <DemoTraderModal
           isOpen={isDemoTraderOpen}
           onClose={() => setIsDemoTraderOpen(false)}
+        />
+
+        {/* all positions modal */}
+        <AllPositionsModal
+          isOpen={isAllPositionsOpen}
+          onClose={() => setIsAllPositionsOpen(false)}
         />
       </main>
     </ClientOnly>

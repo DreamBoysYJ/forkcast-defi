@@ -1,16 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   useAccount,
   usePublicClient,
   useReadContract,
   useWriteContract,
 } from "wagmi";
-import { erc20Abi, parseUnits, decodeEventLog } from "viem";
+import { erc20Abi, formatUnits, parseUnits } from "viem";
 import { strategyRouterContract, strategyLensContract } from "@/lib/contracts";
-import { useHookEventStore, UiHookEvent } from "@/store/useHookEventStore";
-import { hookAbi } from "@/abi/hookAbi";
+import { postTxHint } from "@/lib/backendApi";
 
 import { useRouter } from "next/navigation";
 
@@ -31,13 +30,10 @@ type Phase = "approve" | "open";
 
 const HF_1E18 = 10n ** 18n;
 
-const HOOK_ADDRESS = process.env.NEXT_PUBLIC_HOOK as `0x${string}`;
-
 export function OpenPositionPreviewModal(props: OpenPositionPreviewModalProps) {
   const { isOpen, onClose, supplyOptions, borrowOptions, initialSupplySymbol } =
     props;
-  const router = useRouter(); // 👈 추가
-  const addManyHookEvents = useHookEventStore((s) => s.addMany);
+  const router = useRouter();
 
   // ---- 1) Supply: AAVE만, Borrow: LINK만 사용하도록 필터 ----
   const supplyList =
@@ -71,6 +67,7 @@ export function OpenPositionPreviewModal(props: OpenPositionPreviewModalProps) {
   const [phase, setPhase] = useState<Phase>("approve");
   const [isRunningPreview, setIsRunningPreview] = useState(false);
   const [isRunningTx, setIsRunningTx] = useState(false);
+  const [txError, setTxError] = useState<string | null>(null);
 
   const { address } = useAccount();
   const publicClient = usePublicClient();
@@ -107,15 +104,26 @@ export function OpenPositionPreviewModal(props: OpenPositionPreviewModalProps) {
     if (found) setSupplyAsset(found);
   }, [initialSupplySymbol, supplyList]);
 
-  // AAVE 잔고를 UI 기본값으로 사용 (소수 2자리)
+  // AAVE 잔고를 UI 기본값으로 사용 (내림, 소수 2자리)
   useEffect(() => {
     if (!aaveBalance || aaveDecimals === undefined) return;
-    const raw = aaveBalance as bigint;
     const dec = Number(aaveDecimals);
-    const uiAmount = dec === 0 ? Number(raw) : Number(raw) / Math.pow(10, dec);
-
-    setSupplyAmount(uiAmount.toFixed(2));
+    const full = formatUnits(aaveBalance as bigint, dec);
+    // floor to 2 decimal places via string truncation (반올림 없음)
+    const dotIdx = full.indexOf(".");
+    const floored = dotIdx === -1 ? full : full.slice(0, dotIdx + 3);
+    setSupplyAmount(floored);
   }, [aaveBalance, aaveDecimals]);
+
+  const supplyAmountExceedsBalance = useMemo(() => {
+    if (!aaveBalance || aaveDecimals === undefined || !supplyAmount) return false;
+    const dec = Number(aaveDecimals);
+    try {
+      return parseUnits(supplyAmount, dec) > (aaveBalance as bigint);
+    } catch {
+      return false;
+    }
+  }, [aaveBalance, aaveDecimals, supplyAmount]);
 
   const hasPreview =
     projectedHF !== null &&
@@ -230,17 +238,21 @@ export function OpenPositionPreviewModal(props: OpenPositionPreviewModalProps) {
     if (!hasPreview) return;
     if (!address) return;
 
+    setTxError(null);
+
     if (phase === "approve") {
-      // 1단계: ERC20 approve(router, amount)
       setIsRunningTx(true);
       try {
         const amountNum = Number(supplyAmount) || 0;
-        if (amountNum <= 0) {
-          throw new Error("Supply amount must be > 0");
-        }
+        if (amountNum <= 0) throw new Error("Supply amount must be > 0");
 
         const dec = aaveDecimals !== undefined ? Number(aaveDecimals) : 18;
         const amountBase = parseUnits(supplyAmount, dec);
+
+        if (aaveBalance && amountBase > (aaveBalance as bigint)) {
+          const balStr = formatUnits(aaveBalance as bigint, dec);
+          throw new Error(`Insufficient ${supplyAsset.symbol} balance (have ${balStr})`);
+        }
 
         const txHash = await writeContractAsync({
           abi: erc20Abi,
@@ -249,26 +261,23 @@ export function OpenPositionPreviewModal(props: OpenPositionPreviewModalProps) {
           args: [strategyRouterContract.address as `0x${string}`, amountBase],
         });
 
-        console.log("approve tx hash", txHash);
+        const approveReceipt = await publicClient?.waitForTransactionReceipt({ hash: txHash });
+        if (approveReceipt?.status === "reverted") {
+          throw new Error("Approve transaction reverted on-chain");
+        }
 
-        // 필요하면 여기서 waitForTransactionReceipt 가능
-        // await publicClient?.waitForTransactionReceipt({ hash: txHash });
-
-        // Approve 성공 → 2단계로 전환
         setPhase("open");
       } catch (err) {
         console.error("approve failed", err);
+        setTxError((err as any)?.shortMessage ?? (err as any)?.message ?? "Approve failed");
       } finally {
         setIsRunningTx(false);
       }
     } else {
-      // 2단계: 실제 openPosition 호출
       setIsRunningTx(true);
       try {
         const amountNum = Number(supplyAmount) || 0;
-        if (amountNum <= 0) {
-          throw new Error("Supply amount must be > 0");
-        }
+        if (amountNum <= 0) throw new Error("Supply amount must be > 0");
 
         const dec = aaveDecimals !== undefined ? Number(aaveDecimals) : 18;
         const supplyAmountBase = parseUnits(supplyAmount, dec);
@@ -279,79 +288,28 @@ export function OpenPositionPreviewModal(props: OpenPositionPreviewModalProps) {
             ? 0n
             : BigInt(Math.round(targetHfNum * 1e18));
 
-        // 가스 5,000,000 고정
         const txHash = await writeContractAsync({
           abi: strategyRouterContract.abi,
           address: strategyRouterContract.address,
           functionName: "openPosition",
-          args: [
-            supplyAsset.address,
-            supplyAmountBase,
-            borrowAsset.address,
-            targetHF1e18,
-          ],
+          args: [supplyAsset.address, supplyAmountBase, borrowAsset.address, targetHF1e18],
           gas: 5_000_000n,
         });
 
-        console.log("openPosition tx hash", txHash);
+        postTxHint({ txHash, actionType: "OPEN_POSITION", userAddress: address })
+          .catch((err) => console.error("[tx-hint] OPEN_POSITION failed", err));
 
-        const receipt = await publicClient?.waitForTransactionReceipt({
-          hash: txHash,
-        });
-
-        console.log(
-          "[openPosition] all log addresses",
-          receipt?.logs.map((l) => l.address)
-        );
-        console.log("[openPosition] HOOK_ADDRESS", HOOK_ADDRESS);
-
-        const logsForHook = receipt?.logs.filter(
-          (log) =>
-            HOOK_ADDRESS &&
-            log.address.toLowerCase() === HOOK_ADDRESS.toLowerCase()
-        );
-
-        console.log("[openPosition] logsForHook.length", logsForHook?.length);
-
-        const newEvents: UiHookEvent[] = [];
-        logsForHook?.forEach((log, index) => {
-          try {
-            const decoded = decodeEventLog({
-              abi: hookAbi,
-              data: log.data,
-              topics: log.topics,
-            });
-
-            if (decoded.eventName != "SwapPriceLogged") return;
-
-            const { poolId, tick, sqrtPriceX96, timestamp } =
-              decoded.args as any;
-            const tsSec = Number(timestamp);
-            const tsMs = Number.isFinite(tsSec) ? tsSec * 1000 : Date.now();
-            const evt: UiHookEvent = {
-              id: `${txHash}-${index}`,
-              source: "USER_TX",
-              txHash: txHash,
-              poolId: poolId as `0x${string}`,
-              tick: Number(tick),
-              sqrtPriceX96: BigInt(sqrtPriceX96).toString(),
-              timestampMs: tsMs,
-            };
-            console.log("[openPosition] hook event:", evt);
-            newEvents.push(evt);
-          } catch (e) {
-            console.error("[openPosition] decodeEventLog failed", e);
-          }
-        });
-
-        if (newEvents.length > 0) {
-          addManyHookEvents(newEvents);
+        const receipt = await publicClient?.waitForTransactionReceipt({ hash: txHash });
+        if (receipt?.status === "reverted") {
+          throw new Error("openPosition reverted on-chain");
         }
+
         alert("OPEN POSITION COMPLETED!!!");
         onClose();
         router.refresh();
       } catch (err) {
         console.error("openPosition failed", err);
+        setTxError((err as any)?.shortMessage ?? (err as any)?.message ?? "Transaction failed");
       } finally {
         setIsRunningTx(false);
       }
@@ -418,11 +376,21 @@ export function OpenPositionPreviewModal(props: OpenPositionPreviewModalProps) {
                   ))}
                 </select>
                 <input
-                  className="w-24 rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-right text-sm text-slate-50"
+                  className={`w-24 rounded-lg border px-2 py-1 text-right text-sm text-slate-50 bg-slate-900 ${
+                    supplyAmountExceedsBalance ? "border-rose-500" : "border-slate-700"
+                  }`}
                   value={supplyAmount}
                   onChange={(e) => setSupplyAmount(e.target.value)}
                 />
               </div>
+              {supplyAmountExceedsBalance && (
+                <p className="mt-1 text-xs text-rose-400">
+                  Exceeds wallet balance
+                  {aaveBalance !== undefined && aaveDecimals !== undefined
+                    ? ` (${formatUnits(aaveBalance as bigint, Number(aaveDecimals))} ${supplyAsset.symbol})`
+                    : ""}
+                </p>
+              )}
 
               {/* Borrow asset */}
               <div className="mt-4">
@@ -523,7 +491,10 @@ export function OpenPositionPreviewModal(props: OpenPositionPreviewModalProps) {
         </div>
 
         {/* 푸터 버튼 */}
-        <div className="mt-6 flex items-center justify-end gap-3">
+        {txError && (
+          <p className="mt-4 text-xs text-rose-400">{txError}</p>
+        )}
+        <div className="mt-4 flex items-center justify-end gap-3">
           <button
             onClick={onClose}
             className="rounded-full border border-slate-700 px-4 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800"
@@ -533,7 +504,7 @@ export function OpenPositionPreviewModal(props: OpenPositionPreviewModalProps) {
 
           <button
             onClick={handleClickPrimary}
-            disabled={!hasPreview || isRunningTx}
+            disabled={!hasPreview || isRunningTx || supplyAmountExceedsBalance}
             className="rounded-full bg-emerald-500 px-5 py-2 text-xs font-semibold text-slate-950 hover:bg-emerald-400 disabled:opacity-60"
           >
             {isRunningTx ? "Processing…" : primaryLabel}

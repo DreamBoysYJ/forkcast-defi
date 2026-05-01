@@ -61,9 +61,7 @@ export function StrategyPositionCard() {
 
   if (view && view.tokenId !== 0n) {
     // !isOpen == null
-    const isEffectivelyClosed =
-      !view.isOpen ||
-      (view.totalCollateralUsd === 0 && view.totalDebtUsd === 0);
+    const isEffectivelyClosed = !view.isOpen;
 
     if (!isEffectivelyClosed) {
       const supplyToken = getTokenMeta(view.supplyAsset);

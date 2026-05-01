@@ -1,6 +1,5 @@
 "use client";
 
-import { useHookEventStore } from "@/store/useHookEventStore";
 import { useState } from "react";
 
 type DemoTraderModalProps = {
@@ -23,18 +22,6 @@ type DemoTraderApiResponse = {
       timestamp: string; // block.timestamp (seconds, string)
     }[];
   };
-};
-
-// ✅ 우리가 zustand에 넣을려고 하는 UI용 이벤트 타입 (예시)
-type UiHookEvent = {
-  id: string;
-  source: "DEMO_TRADER";
-  txHash: `0x${string}`;
-  poolId: `0x${string}`;
-  tick: number;
-  sqrtPriceX96: string;
-  // 프론트에서 쓰기 편하게 ms 단위로 바꾼 시간
-  timestampMs: number;
 };
 
 export function DemoTraderModal({ isOpen, onClose }: DemoTraderModalProps) {
@@ -60,32 +47,10 @@ export function DemoTraderModal({ isOpen, onClose }: DemoTraderModalProps) {
       console.log("[demo-trader] raw response", data);
 
       const { result } = data;
-      const { hookEvents } = result;
-
-      // ✅ zustand에 넣을 용도로 변환 (source 붙이고, timestamp → ms로 변환)
-      const uiEvents: UiHookEvent[] = hookEvents.map((evt, index) => {
-        const tsSec = Number(evt.timestamp); // block.timestamp (seconds)
-        const tsMs = Number.isFinite(tsSec) ? tsSec * 1000 : Date.now();
-
-        return {
-          id: `${evt.txHash}-${index}`, // 나중에 nanoid 써도 되고
-          source: "DEMO_TRADER",
-          txHash: evt.txHash,
-          poolId: evt.poolId,
-          tick: evt.tick,
-          sqrtPriceX96: evt.sqrtPriceX96,
-          timestampMs: tsMs,
-        };
-      });
-
-      console.log("[demo-trader] uiEvents for zustand", uiEvents);
-
-      // 🔮 나중에 이렇게 쓸 예정:
-      useHookEventStore.getState().addMany(uiEvents);
 
       const msg =
         `Demo trader finished.\n` +
-        `Swaps: ${result.swaps}, Hook events: ${uiEvents.length}`;
+        `Swaps: ${result.swaps}, Hook events: ${result.hookEvents.length}`;
 
       alert(msg);
       onClose();

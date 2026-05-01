@@ -55,7 +55,7 @@ export function useStrategyPositionView() {
   } = useReadContracts({
     contracts: !address
       ? []
-      : Array.from({ length: 5 }, (_, i) => ({
+      : Array.from({ length: 20 }, (_, i) => ({
           ...strategyRouterContract,
           functionName: "userPositionIds",
           args: [address as `0x${string}`, BigInt(i)],
@@ -107,6 +107,22 @@ export function useStrategyPositionView() {
   });
 
   let view: StrategyPositionView | null = null;
+
+  // allowFailure:true 는 top-level error를 세우지 않으므로 per-item 실패를 직접 추출
+  const viewItemErrors: Error[] =
+    (viewResults ?? [])
+      .filter((r: any) => r?.status === "failure")
+      .map((r: any) => r?.error);
+
+  if (viewItemErrors.length > 0) {
+    console.error("[useStrategyPositionView] getStrategyPositionView per-item failures:", viewItemErrors);
+  }
+
+  const allViewsFailed =
+    hasAnyToken &&
+    viewResults !== undefined &&
+    viewResults.length > 0 &&
+    viewResults.every((r: any) => r?.status === "failure");
 
   if (viewResults && tokenIds.length > 0) {
     const mapToView = (raw: any, tokenId: bigint): StrategyPositionView => ({
@@ -162,14 +178,14 @@ export function useStrategyPositionView() {
   }
 
   const isLoading = isIdsLoading || isViewsLoading;
-  const isError = Boolean(idsError || viewsError);
+  const isError = Boolean(idsError || viewsError || allViewsFailed);
   const isRateLimited =
-    isRateLimitError(idsError) || isRateLimitError(viewsError); // ⭐ 추가
+    isRateLimitError(idsError) || isRateLimitError(viewsError);
 
   return {
     view,
     isLoading,
     isError,
-    isRateLimited, // <- 카드에서 "RPC rate limit" 안내 띄울 수 있음
+    isRateLimited,
   };
 }
