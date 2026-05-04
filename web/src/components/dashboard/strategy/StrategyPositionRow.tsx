@@ -89,9 +89,10 @@ export function StrategyPositionRow({ data, onClickPreviewClose, onClickHistory,
     onClickPreviewClose(data.tokenId);
   };
 
+  const isHfInfinite = !isFinite(healthFactor) || healthFactor > 1e50;
   let hfColor = "text-emerald-300";
-  if (healthFactor < 1.1) hfColor = "text-rose-300";
-  else if (healthFactor < 1.3) hfColor = "text-amber-300";
+  if (!isHfInfinite && healthFactor < 1.1) hfColor = "text-rose-300";
+  else if (!isHfInfinite && healthFactor < 1.3) hfColor = "text-amber-300";
 
   return (
     <div className="grid gap-6 md:grid-cols-3">
@@ -236,7 +237,7 @@ export function StrategyPositionRow({ data, onClickPreviewClose, onClickHistory,
               Health factor
             </div>
             <div className={`text-xl font-semibold ${hfColor}`}>
-              {healthFactor.toFixed(2)}
+              {isHfInfinite ? "∞" : healthFactor.toFixed(2)}
             </div>
           </div>
 

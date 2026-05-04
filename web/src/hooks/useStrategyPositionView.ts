@@ -128,7 +128,7 @@ export function useStrategyPositionView() {
     availableBorrowUsd: Number(raw.availableBorrowBase) / 1e8,
     ltv: Number(raw.ltv) / 1e4,
     liqThreshold: Number(raw.currentLiquidationThreshold) / 1e4,
-    healthFactor: Number(raw.healthFactor) / 1e18,
+    healthFactor: raw.healthFactor >= 2n ** 128n ? Infinity : Number(raw.healthFactor) / 1e18,
   });
 
   // allowFailure:true 는 top-level error를 세우지 않으므로 per-item 실패를 직접 추출

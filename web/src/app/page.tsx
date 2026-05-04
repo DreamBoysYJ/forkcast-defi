@@ -17,6 +17,7 @@ import { DemoTraderModal } from "@/components/modals/DemoTraderModal";
 import { AllPositionsModal } from "@/components/modals/AllPositionsModal";
 
 import { useState } from "react";
+import { useAccount, useBalance } from "wagmi";
 import { HookEventSection } from "@/components/dashboard/HookEventSection";
 
 export default function Page() {
@@ -26,6 +27,9 @@ export default function Page() {
   >(undefined);
   const [isDemoTraderOpen, setIsDemoTraderOpen] = useState(false);
   const [isAllPositionsOpen, setIsAllPositionsOpen] = useState(false);
+
+  const { address: walletAddress, isConnected } = useAccount();
+  const { data: ethBalance } = useBalance({ address: walletAddress });
 
   const supplyOptions: AssetOption[] = [
     {
@@ -50,10 +54,26 @@ export default function Page() {
     <ClientOnly>
       {" "}
       <main className="min-h-screen bg-slate-900 text-white p-6">
-        <h1 className="text-xl font-semibold">Forkcast DeFi</h1>
-        <p className="text-sm text-gray-500">
-          Preview & run a one-shot Aave → Uniswap v4 LP strategy
-        </p>
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="text-xl font-semibold">Forkcast DeFi</h1>
+            <p className="text-sm text-gray-500">
+              Preview & run a one-shot Aave → Uniswap v4 LP strategy
+            </p>
+          </div>
+          {isConnected && walletAddress && (
+            <div className="flex flex-col items-end gap-1 rounded-xl border border-slate-700 bg-slate-800/60 px-4 py-2 text-right">
+              <span className="text-xs text-slate-400">
+                {walletAddress.slice(0, 6)}…{walletAddress.slice(-4)}
+              </span>
+              <span className="text-sm font-semibold text-slate-100">
+                {ethBalance
+                  ? `${parseFloat(ethBalance.formatted).toFixed(4)} ETH`
+                  : "—"}
+              </span>
+            </div>
+          )}
+        </div>
 
         {/* Top : 왼쪽 Connect/Demo, 오른쪽 All Positions */}
         <div className="mt-6 flex items-center justify-between">
