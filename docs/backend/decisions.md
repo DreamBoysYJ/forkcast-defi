@@ -270,26 +270,33 @@ A lease-based lock is safer than a boolean lock.
 
 ---
 
-## 13. Event-sync interval starts at 1 minute
+## 13. Event-sync starts at 5 minutes and reads only to safe head
 
 Decision:
 
-Initial `event-sync` interval is 1 minute.
+Initial `event-sync` interval is 5 minutes.
+
+Cloud Scheduler only triggers the internal endpoint.
+
+The backend computes the runtime block range.
+
+In v1:
+
+- `fromBlock = lastSyncedBlock + 1`
+- `toBlock = latestBlock - 5`
+- if the cursor does not exist yet, initialize it near `safeHead` using a small bootstrap window instead of starting from genesis
 
 Reason:
 
-Event sync affects user-visible history and open position lists.
-
-Too much delay creates poor UX.
-
-Cloud Scheduler is naturally minute-based.
-
-The queried event scope is narrow:
-
-- Router events
-- Hook events
-
-This is a practical v1 starting point.
+- This backend is an off-chain indexer/query backend, not a real-time transaction executor.
+- A 5-minute interval reduces downstream work:
+  - Cloud Run executions
+  - RPC calls
+  - DB writes
+- Avoiding the newest few blocks is a simple way to reduce recent-block instability in v1.
+- This policy keeps cursor semantics simple and avoids early rewind/rebuild complexity.
+- The main outputs of event-sync are read/query data, so modest delay is acceptable in v1.
+- For the first production run, scanning from block 0 to the current Sepolia head in one shot is unnecessary and can be too heavy for RPC providers.
 
 ---
 
@@ -342,3 +349,59 @@ The API shape may change during implementation.
 Early examples help with thinking, frontend planning, and QA planning.
 
 Final contract can later be stabilized through DTOs and OpenAPI/Swagger.
+
+---
+
+## 17. Use `web3j` first for v1 chain access
+
+Decision:
+
+Use `web3j` as the first chain client for v1 sync/snapshot work.
+
+The initial RPC scope is still:
+- `eth_blockNumber`
+- `eth_getLogs`
+- `eth_call`
+
+Reason:
+
+- Current RPC scope is still small, but ABI/event decode started to add avoidable manual complexity.
+- `web3j` keeps the first implementation shorter and easier to verify for log reads and event decoding.
+- `event-sync` needs only `eth_blockNumber` and `eth_getLogs`.
+- `snapshot` mainly needs `eth_blockNumber` and `eth_call` to `StrategyLens`.
+
+---
+
+## 18. Keep one public API service and protect only internal job URLs in app code
+
+Decision:
+
+Keep the current API structure in one Cloud Run service.
+
+Do not split public API and internal jobs into separate services in v1.
+
+Protect only:
+
+- `POST /internal/jobs/event-sync`
+- `POST /internal/jobs/snapshot`
+
+using app-level verification of Google OIDC Bearer tokens.
+
+The backend should verify:
+
+- Google-signed ID token
+- expected `audience`
+- allowed scheduler service account email
+
+Reason:
+
+- The current URL structure should stay as-is.
+- Public query APIs must remain open.
+- Internal job endpoints must not be executable by arbitrary callers.
+- An app-level interceptor is the smallest v1 change that satisfies both.
+
+Notes:
+
+- This is not a shared static secret check.
+- This is not a User-Agent or IP-based check.
+- Local development may disable this check with a config flag.
