@@ -150,23 +150,14 @@ export function useStrategyPositionView() {
   let views: StrategyPositionView[] = [];
 
   if (viewResults && tokenIds.length > 0) {
-    const openViews: StrategyPositionView[] = [];
-    let closedFallback: StrategyPositionView | null = null;
-
     for (let i = 0; i < viewResults.length; i++) {
       const r: any = viewResults[i];
       if (!r) continue;
       const raw = r.result ?? r;
       if (!raw || !raw.core) continue;
-      const mapped = mapToView(raw, tokenIds[i]);
-      if (raw.core.isOpen) {
-        openViews.push(mapped);
-      } else {
-        closedFallback = mapped; // 마지막 closed가 남음 (가장 최근 인덱스)
-      }
+      if (!raw.core.isOpen) continue;
+      views.push(mapToView(raw, tokenIds[i]));
     }
-
-    views = openViews.length > 0 ? openViews : (closedFallback ? [closedFallback] : []);
   }
 
   const isLoading = isIdsLoading || isViewsLoading;

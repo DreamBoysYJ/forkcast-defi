@@ -84,6 +84,43 @@ export async function fetchPositionTimeline(
   return data.items;
 }
 
+// ── Position snapshots ─────────────────────────────────────────────────────
+
+export type SnapshotItem = {
+  tokenId: number;
+  ownerAddress: string;
+  vaultAddress: string;
+  supplyAsset: string;
+  borrowAsset: string;
+  isOpen: boolean;
+  liquidity: string;
+  amount0Now: string;
+  amount1Now: string;
+  currentTick: number;
+  sqrtPriceX96: string;
+  totalCollateralBase: string;
+  totalDebtBase: string;
+  healthFactor: string;
+  snapshotAt: string;
+  observedBlockNumber: number;
+};
+
+type SnapshotsResponse = {
+  items: SnapshotItem[];
+  nextCursor: string | null;
+};
+
+export async function fetchPositionSnapshots(
+  tokenId: number,
+  limit = 20
+): Promise<SnapshotItem[]> {
+  const url = `${BACKEND_URL}/api/positions/${tokenId}/snapshots?limit=${limit}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`snapshots ${res.status}`);
+  const data: SnapshotsResponse = await res.json();
+  return data.items;
+}
+
 // ── All open positions ─────────────────────────────────────────────────────
 
 type AllPositionsResponse = {
