@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useAccount } from "wagmi";
 import { useQuery } from "@tanstack/react-query";
 import { formatUnits } from "viem";
@@ -125,6 +126,64 @@ function TimelineRow({ item }: { item: TimelineItem }) {
   );
 }
 
+// ── Collapsible per-position timeline ─────────────────────────────────────
+
+function CollapsibleTimeline({ tokenId }: { tokenId: number }) {
+  const [isOpen, setIsOpen] = useState(false);
+
+  const { data: timeline, isLoading, isError } = useQuery({
+    queryKey: ["position-timeline", tokenId],
+    queryFn: () => fetchPositionTimeline(tokenId, 20),
+    enabled: isOpen,
+    staleTime: 30_000,
+  });
+
+  return (
+    <div className="border-t border-slate-800/60 first:border-t-0">
+      {/* Clickable header */}
+      <button
+        onClick={() => setIsOpen((v) => !v)}
+        className="flex w-full items-center justify-between px-6 py-3 text-left hover:bg-slate-800/30"
+      >
+        <span className="text-[11px] font-medium text-slate-300">
+          Token #{tokenId}
+        </span>
+        <span className="text-[10px] text-slate-500">
+          {isOpen ? "▲ collapse" : "▼ expand"}
+        </span>
+      </button>
+
+      {/* Timeline body */}
+      {isOpen && (
+        <div className="bg-slate-900/40">
+          {isLoading ? (
+            <div className="px-6 py-4 text-center text-[11px] text-slate-400">
+              Loading…
+            </div>
+          ) : isError ? (
+            <div className="px-6 py-4 text-center text-[11px] text-red-400">
+              Failed to load timeline.
+            </div>
+          ) : !timeline || timeline.length === 0 ? (
+            <div className="px-6 py-4 text-center text-[11px] text-slate-400">
+              No activity recorded yet.
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-800/80">
+              {timeline.map((item) => (
+                <TimelineRow
+                  key={`${item.txHash}-${item.eventType}`}
+                  item={item}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Section ────────────────────────────────────────────────────────────────
 
 export function PositionActivitySection() {
@@ -132,8 +191,8 @@ export function PositionActivitySection() {
 
   const {
     data: positions,
-    isLoading: isPositionsLoading,
-    isError: isPositionsError,
+    isLoading,
+    isError,
   } = useQuery({
     queryKey: ["user-open-positions", address],
     queryFn: () => fetchUserOpenPositions(address!, 20),
@@ -141,72 +200,50 @@ export function PositionActivitySection() {
     staleTime: 30_000,
   });
 
-  const firstTokenId = positions?.[0]?.tokenId;
-
-  const {
-    data: timeline,
-    isLoading: isTimelineLoading,
-    isError: isTimelineError,
-  } = useQuery({
-    queryKey: ["position-timeline", firstTokenId],
-    queryFn: () => fetchPositionTimeline(firstTokenId!, 20),
-    enabled: !!firstTokenId,
-    staleTime: 30_000,
-  });
-
-  const isLoading = isPositionsLoading || (!!firstTokenId && isTimelineLoading);
-  const isError = isPositionsError || isTimelineError;
   const hasNoPositions =
     !isLoading && !isError && positions !== undefined && positions.length === 0;
 
   return (
     <section className="mt-6 rounded-2xl border border-slate-800 bg-slate-950/60 shadow-sm">
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800/60">
+      <div className="flex items-center justify-between border-b border-slate-800/60 px-6 py-4">
         <div className="flex flex-col">
           <h2 className="text-[15px] font-semibold text-slate-50">
             Position activity
           </h2>
           <p className="text-[11px] text-slate-400">
-            Timeline of your open position
+            Click a position to expand its timeline
           </p>
         </div>
-        {firstTokenId !== undefined && (
+        {positions && positions.length > 0 && (
           <span className="text-[11px] text-slate-500">
-            Token #{firstTokenId}
+            {positions.length} position{positions.length > 1 ? "s" : ""}
           </span>
         )}
       </div>
 
       {/* Body */}
-      <div className="overflow-hidden rounded-b-2xl bg-slate-950/40">
+      <div className="overflow-hidden rounded-b-2xl">
         {!address ? (
           <div className="px-6 py-6 text-center text-[11px] text-slate-400">
             Connect wallet to see position activity.
           </div>
         ) : isLoading ? (
           <div className="px-6 py-6 text-center text-[11px] text-slate-400">
-            Loading position activity…
+            Loading positions…
           </div>
         ) : isError ? (
           <div className="px-6 py-6 text-center text-[11px] text-red-400">
-            Failed to load position activity. Check backend connection.
+            Failed to load positions. Check backend connection.
           </div>
         ) : hasNoPositions ? (
           <div className="px-6 py-6 text-center text-[11px] text-slate-400">
             No open positions found.
           </div>
-        ) : !timeline || timeline.length === 0 ? (
-          <div className="px-6 py-6 text-center text-[11px] text-slate-400">
-            No activity recorded yet.
-          </div>
         ) : (
-          <div className="max-h-72 divide-y divide-slate-800/80 overflow-y-auto bg-slate-900/60">
-            {timeline.map((item) => (
-              <TimelineRow
-                key={`${item.txHash}-${item.eventType}`}
-                item={item}
-              />
+          <div>
+            {positions!.map((pos) => (
+              <CollapsibleTimeline key={pos.tokenId} tokenId={pos.tokenId} />
             ))}
           </div>
         )}

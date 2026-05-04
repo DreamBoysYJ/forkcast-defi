@@ -106,7 +106,30 @@ export function useStrategyPositionView() {
     },
   });
 
-  let view: StrategyPositionView | null = null;
+  const mapToView = (raw: any, tokenId: bigint): StrategyPositionView => ({
+    tokenId,
+    owner: raw.core.owner,
+    vault: raw.core.vault,
+    supplyAsset: raw.core.supplyAsset,
+    borrowAsset: raw.core.borrowAsset,
+    isOpen: raw.core.isOpen,
+
+    uniToken0: raw.uniToken0,
+    uniToken1: raw.uniToken1,
+    liquidity: raw.liquidity,
+    amount0Now: Number(raw.amount0Now) / 1e18,
+    amount1Now: Number(raw.amount1Now) / 1e18,
+    tickLower: Number(raw.tickLower),
+    tickUpper: Number(raw.tickUpper),
+    currentTick: Number(raw.currentTick),
+
+    totalCollateralUsd: Number(raw.totalCollateralBase) / 1e8,
+    totalDebtUsd: Number(raw.totalDebtBase) / 1e8,
+    availableBorrowUsd: Number(raw.availableBorrowBase) / 1e8,
+    ltv: Number(raw.ltv) / 1e4,
+    liqThreshold: Number(raw.currentLiquidationThreshold) / 1e4,
+    healthFactor: Number(raw.healthFactor) / 1e18,
+  });
 
   // allowFailure:true 는 top-level error를 세우지 않으므로 per-item 실패를 직접 추출
   const viewItemErrors: Error[] =
@@ -124,57 +147,26 @@ export function useStrategyPositionView() {
     viewResults.length > 0 &&
     viewResults.every((r: any) => r?.status === "failure");
 
+  let views: StrategyPositionView[] = [];
+
   if (viewResults && tokenIds.length > 0) {
-    const mapToView = (raw: any, tokenId: bigint): StrategyPositionView => ({
-      tokenId,
-      owner: raw.core.owner,
-      vault: raw.core.vault,
-      supplyAsset: raw.core.supplyAsset,
-      borrowAsset: raw.core.borrowAsset,
-      isOpen: raw.core.isOpen,
+    const openViews: StrategyPositionView[] = [];
+    let closedFallback: StrategyPositionView | null = null;
 
-      uniToken0: raw.uniToken0,
-      uniToken1: raw.uniToken1,
-      liquidity: raw.liquidity,
-      amount0Now: Number(raw.amount0Now) / 1e18,
-      amount1Now: Number(raw.amount1Now) / 1e18,
-      tickLower: Number(raw.tickLower),
-      tickUpper: Number(raw.tickUpper),
-      currentTick: Number(raw.currentTick),
-
-      totalCollateralUsd: Number(raw.totalCollateralBase) / 1e8,
-      totalDebtUsd: Number(raw.totalDebtBase) / 1e8,
-      availableBorrowUsd: Number(raw.availableBorrowBase) / 1e8,
-      ltv: Number(raw.ltv) / 1e4,
-      liqThreshold: Number(raw.currentLiquidationThreshold) / 1e4,
-      healthFactor: Number(raw.healthFactor) / 1e18,
-    });
-
-    // 최신 open 포지션 우선
-    for (let i = viewResults.length - 1; i >= 0; i--) {
+    for (let i = 0; i < viewResults.length; i++) {
       const r: any = viewResults[i];
       if (!r) continue;
       const raw = r.result ?? r;
       if (!raw || !raw.core) continue;
+      const mapped = mapToView(raw, tokenIds[i]);
       if (raw.core.isOpen) {
-        const tokenId = tokenIds[i];
-        view = mapToView(raw, tokenId);
-        break;
+        openViews.push(mapped);
+      } else {
+        closedFallback = mapped; // 마지막 closed가 남음 (가장 최근 인덱스)
       }
     }
 
-    // fallback: closed 라도 하나 보여주고 싶으면
-    if (!view) {
-      for (let i = viewResults.length - 1; i >= 0; i--) {
-        const r: any = viewResults[i];
-        if (!r) continue;
-        const raw = r.result ?? r;
-        if (!raw || !raw.core) continue;
-        const tokenId = tokenIds[i];
-        view = mapToView(raw, tokenId);
-        break;
-      }
-    }
+    views = openViews.length > 0 ? openViews : (closedFallback ? [closedFallback] : []);
   }
 
   const isLoading = isIdsLoading || isViewsLoading;
@@ -183,7 +175,7 @@ export function useStrategyPositionView() {
     isRateLimitError(idsError) || isRateLimitError(viewsError);
 
   return {
-    view,
+    views,
     isLoading,
     isError,
     isRateLimited,

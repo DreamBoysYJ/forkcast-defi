@@ -1,5 +1,138 @@
 # Frontend Agent Log
 
+## 2026-05-04 Position activity 섹션 — 전체 포지션 accordion 구조로 변경 ✓
+
+- 작업 목적
+  - 기존에 `positions[0]` 하나만 보이던 구조 → 전체 오픈 포지션 accordion으로 변경
+  - 페이지가 길어지는 문제 해결: 기본 접힘, 클릭 시 펼침
+- 변경한 파일
+  - `web/src/components/dashboard/strategy/PositionActivitySection.tsx`
+    - `firstTokenId` 단일 조회 → `positions` 전체 목록 기반 렌더링
+    - `CollapsibleTimeline` 컴포넌트 추가: tokenId 헤더 클릭 시 expand, timeline fetch도 `enabled: isOpen`으로 lazy load
+    - 헤더 설명 텍스트 → "Click a position to expand its timeline"
+    - 포지션 수 표시 (N positions)
+- 왜 그렇게 했는지
+  - 페이지가 이미 길어서 기본 접힘 필수
+  - timeline API는 펼칠 때만 호출 → 불필요한 백엔드 요청 없음
+- 남은 문제
+  - 없음
+
+---
+
+## 2026-05-04 Collect fees를 Strategy overview로 이동, UniswapPositionCard 제거 ✓
+
+- 작업 목적
+  - "Your Uniswap LP" 섹션 제거, collect fees 기능을 Strategy overview 각 포지션 row에 통합
+- 읽은 파일
+  - `web/src/components/dashboard/UniswapPositionCard.tsx`
+  - `web/src/components/modals/CollectFeesModal.tsx`
+  - `web/src/app/page.tsx`
+- 변경한 파일
+  - `web/src/components/dashboard/strategy/StrategyPositionCard.tsx`
+    - `useConfig`, `useAccount`, `simulateContract`, `writeContract`, `waitForTransactionReceipt` 추가
+    - collect fees 관련 state (`collectPosition`, `isCollectOpen`, `isCollectProcessing`) 추가
+    - `handleCollectClick` / `handlePreviewCollect` / `handleExecuteCollect` 핸들러 추가
+    - `CollectFeesModal` 렌더링 추가
+  - `web/src/components/dashboard/strategy/StrategyPositionRow.tsx`
+    - `onClickCollect?: (tokenId: number) => void` prop 추가
+    - "Collect fees" 버튼 추가 (`bg-emerald-600` solid fill, History/Preview close 사이)
+  - `web/src/app/page.tsx`
+    - `UniswapPositionCard` import 및 렌더링 제거
+- 왜 그렇게 했는지
+  - Uni LP 정보(pool, range, amounts)는 Strategy overview row에 이미 표시됨 → 중복 UI 제거
+  - collect fees 로직은 `UniswapPositionCard`에서 `simulateContract` + `writeContract` 패턴 그대로 이식
+  - 버튼 색상 emerald (초록 solid)으로 눈에 띄게 — History(grey), Preview close(indigo tint)와 구분
+- 남은 문제
+  - `UniswapPositionCard.tsx`, `UniswapPositionRow.tsx`, `useUserUniPositions.ts` 파일은 아직 남아 있음
+  - `UniswapPositionRow.tsx`는 `CollectFeesModal`이 `UniPositionRowData` 타입을 import하므로 삭제 불가
+  - `UniswapPositionCard.tsx`, `useUserUniPositions.ts`는 더 이상 사용되지 않으나 cleanup은 나중에
+
+---
+
+## 2026-05-04 Strategy overview 다중 포지션 표시 ✓
+
+- 작업 목적
+  - 오픈 포지션이 여러 개일 때 하나만 보이던 문제 수정 → 전부 표시
+- 읽은 파일
+  - `web/src/hooks/useStrategyPositionView.ts`
+  - `web/src/components/dashboard/strategy/StrategyPositionCard.tsx`
+  - `web/src/components/dashboard/strategy/StrategyPositionRow.tsx`
+- 변경한 파일
+  - `web/src/hooks/useStrategyPositionView.ts`
+    - 반환값 `view: StrategyPositionView | null` → `views: StrategyPositionView[]`
+    - 오픈 포지션 전부 수집, 없으면 가장 마지막 closed 1개 fallback
+  - `web/src/components/dashboard/strategy/StrategyPositionRow.tsx`
+    - `onClickHistory?: (tokenId: number) => void` prop 추가
+    - "History" 버튼을 "Preview close" 버튼 왼쪽에 추가
+  - `web/src/components/dashboard/strategy/StrategyPositionCard.tsx`
+    - `views` 배열 기반 리스트 렌더링 (divide-y 구분선)
+    - History/Close 모달이 각자 클릭된 tokenId 추적 (`snapshotTokenId` state 추가)
+    - 헤더 Open/Closed 뱃지 제거 (각 row에 이미 있음)
+    - `toRowData()` 헬퍼 함수로 view → StrategyPositionRowData 변환 분리
+- 왜 그렇게 했는지
+  - 기존 훅은 `break`로 첫 open 포지션 하나만 선택 → 의도적 단일 표시였지만 요구사항 변경
+  - Close/History 모달은 기존처럼 tokenId 기반 상태로 관리, 다중 포지션에서도 올바른 tokenId 전달
+- 남은 문제
+  - 없음
+
+---
+
+## 2026-05-04 Snapshot history 모달 연동 (plan 5번) ✓
+
+- 작업 목적
+  - `GET /api/positions/{tokenId}/snapshots` 연동, StrategyPositionCard에 History 버튼 + 모달 표시
+- 읽은 파일
+  - `docs/frontend/backend-integration-plan.md` (5번 항목)
+  - `api-spec.md` (1-5)
+  - `web/src/components/modals/PositionSnapshotModal.tsx`
+  - `web/src/lib/backendApi.ts`
+  - `web/src/components/dashboard/strategy/StrategyPositionCard.tsx`
+  - `web/src/components/dashboard/strategy/StrategyPositionRow.tsx`
+- 변경한 파일
+  - `web/src/components/modals/PositionSnapshotModal.tsx`
+    - `isNoDebt(s)` 헬퍼 추가: `totalDebtBase === "0"` 또는 healthFactor가 `"9999999999..."` 로 시작하면 true
+    - HF 셀: sentinel이면 `"No Debt"` (emerald 색), 아니면 기존 parseFloat 기반 색상 + `fmtHF` 표시
+  - `web/src/components/dashboard/strategy/StrategyPositionCard.tsx`
+    - 카드 헤더에 `History` 버튼 추가 (포지션 있을 때만, Open/Closed 뱃지 왼쪽)
+    - `<PositionSnapshotModal>` 렌더링 연결 (rowData가 있을 때 tokenId 전달)
+- 왜 그렇게 했는지
+  - `PositionSnapshotModal.tsx`와 `backendApi.ts`의 snapshot 관련 코드는 이미 구현되어 있었음
+  - `StrategyPositionCard`에 `isSnapshotOpen` state와 import는 있었으나 버튼/렌더링이 빠져 있었음
+  - sentinel값을 `Number()`로 변환하면 정밀도 손실 → string prefix 비교로 처리
+- 남은 문제
+  - plan 기준으로 구현 완료. 백엔드 snapshot job이 실제로 데이터를 수집해야 UI에서 내용이 보임
+
+---
+
+## 2026-05-01 snapshot healthFactor sentinel 프론트 메모 추가 ✓
+
+- 작업 목적
+  - Claude Code 프론트 작업자가 snapshot API의 `healthFactor` sentinel 규칙을 놓치지 않게 문서에 남긴다
+- 읽은 파일
+  - `docs/frontend/backend-integration-plan.md`
+  - `docs/agent-logs/frontend.md`
+- 변경한 파일
+  - `docs/frontend/backend-integration-plan.md`
+  - `docs/agent-logs/frontend.md`
+- 한 일
+  - snapshot API 섹션을 추가하고, `GET /api/positions/{tokenId}/snapshots` 연동 위치를 `StrategyPositionCard`의 히스토리 모달로 명시했다
+  - no-debt 포지션의 `healthFactor`가 백엔드에서 최대 finite 값으로 요약될 수 있다는 점과, 프론트는 이를 `No Debt` / `Very High` 같은 표현으로 풀어야 한다는 규칙을 적었다
+- 왜 그렇게 했는지
+  - 프론트가 이 값을 일반 숫자로 처리하면 UX가 어색하고, 잘못하면 다시 `Number()` 기반 정밀도 문제가 생긴다
+  - 프론트 담당이 작업 시작 전에 읽는 문서에 직접 있어야 실제 구현에서 반영된다
+- 남은 문제
+  - 실제 UI 구현은 아직 프론트 담당 작업이 남아 있다
+
+## 2026-05-01 브랜치 생성 및 푸시 ✓
+
+- 브랜치: `claude-frontend` (base: `cluade-setup`)
+- 커밋: `4626990` — feat(web): integrate backend APIs and fix transaction flow
+- 포함된 파일: 오늘 작업한 web/ 프론트 파일 14개 + docs/agent-logs/frontend.md
+- 백엔드 staged 파일은 제외하고 프론트 파일만 선택적으로 커밋
+- 원격 푸시: `origin/claude-frontend`
+
+---
+
 ## 2026-05-01 전체 활성 포지션 모달 연동 (1-3) ✓
 
 - 작업 목적

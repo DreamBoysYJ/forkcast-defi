@@ -2,14 +2,24 @@
 "use client";
 
 import { useState } from "react";
+import { useAccount, useConfig } from "wagmi";
+import {
+  simulateContract,
+  writeContract,
+  waitForTransactionReceipt,
+} from "@wagmi/core";
 import {
   StrategyPositionRow,
   type StrategyPositionRowData,
 } from "./StrategyPositionRow";
 import { ClosePositionPreviewModal } from "@/components/modals/ClosePositionPreviewModal";
+import { PositionSnapshotModal } from "@/components/modals/PositionSnapshotModal";
+import { CollectFeesModal } from "@/components/modals/CollectFeesModal";
+import type { UniPositionRowData } from "@/components/dashboard/UniswapPositionRow";
 import { useStrategyPositionView } from "@/hooks/useStrategyPositionView";
+import { strategyRouterContract } from "@/lib/contracts";
+import { postTxHint } from "@/lib/backendApi";
 
-// address -> symbol/icon mapping (.env based)
 const TOKEN_META: Record<string, { symbol: string; iconUrl: string }> = {
   [(process.env.NEXT_PUBLIC_AAVE_UNDERLYING_SEPOLIA ?? "").toLowerCase()]: {
     symbol: "AAVE",
@@ -28,89 +38,155 @@ const TOKEN_META: Record<string, { symbol: string; iconUrl: string }> = {
 function getTokenMeta(addr: `0x${string}`) {
   const key = addr.toLowerCase();
   const meta = TOKEN_META[key];
-
   if (meta) return meta;
-
-  // fallback: show sliced address
   const short = `${addr.slice(0, 6)}...${addr.slice(-4)}`;
+  return { symbol: short, iconUrl: "/tokens/default.png" };
+}
+
+function toRowData(
+  view: ReturnType<typeof useStrategyPositionView>["views"][number]
+): StrategyPositionRowData {
+  const supplyToken = getTokenMeta(view.supplyAsset);
+  const borrowToken = getTokenMeta(view.borrowAsset);
+  const poolToken0 = getTokenMeta(view.uniToken0);
+  const poolToken1 = getTokenMeta(view.uniToken1);
+  const inRange =
+    view.currentTick >= view.tickLower && view.currentTick <= view.tickUpper;
+
   return {
-    symbol: short,
-    iconUrl: "/tokens/default.png",
+    tokenId: Number(view.tokenId),
+    isOpen: view.isOpen,
+    supplyToken,
+    borrowToken,
+    owner: view.owner,
+    vault: view.vault,
+    poolToken0,
+    poolToken1,
+    amount0Now: view.amount0Now,
+    amount1Now: view.amount1Now,
+    rangeLabel: `${view.tickLower} ~ ${view.tickUpper}`,
+    currentTickLabel: `Current tick ≈ ${view.currentTick}`,
+    inRange,
+    totalCollateralUsd: view.totalCollateralUsd,
+    totalDebtUsd: view.totalDebtUsd,
+    availableBorrowUsd: view.availableBorrowUsd,
+    ltv: view.ltv,
+    liquidationThreshold: view.liqThreshold,
+    healthFactor: view.healthFactor,
   };
 }
 
 export function StrategyPositionCard() {
-  // 1) Onchain total View Hook
-  const { view, isLoading, isError, isRateLimited } = useStrategyPositionView();
+  const { views, isLoading, isError, isRateLimited } = useStrategyPositionView();
+  const wagmiConfig = useConfig();
+  const { address } = useAccount();
 
-  // 2) Close preview Modal State
+  // Close modal
   const [isCloseModalOpen, setIsCloseModalOpen] = useState(false);
   const [selectedTokenId, setSelectedTokenId] = useState<number | null>(null);
+
+  // Snapshot modal
+  const [isSnapshotOpen, setIsSnapshotOpen] = useState(false);
+  const [snapshotTokenId, setSnapshotTokenId] = useState<number | null>(null);
+
+  // Collect fees modal
+  const [isCollectOpen, setIsCollectOpen] = useState(false);
+  const [collectPosition, setCollectPosition] =
+    useState<UniPositionRowData | null>(null);
+  const [isCollectProcessing, setIsCollectProcessing] = useState(false);
+
+  const rowDataList = views.filter((v) => v.tokenId !== 0n).map(toRowData);
+  const hasPosition = rowDataList.length > 0;
+
+  const selectedRowData =
+    selectedTokenId !== null
+      ? (rowDataList.find((r) => r.tokenId === selectedTokenId) ?? null)
+      : null;
 
   const handlePreviewCloseClick = (tokenId: number) => {
     setSelectedTokenId(tokenId);
     setIsCloseModalOpen(true);
   };
 
-  const handleCloseModal = () => {
-    setIsCloseModalOpen(false);
+  const handleHistoryClick = (tokenId: number) => {
+    setSnapshotTokenId(tokenId);
+    setIsSnapshotOpen(true);
   };
 
-  // 3) Onchain view → Change Row - StrategyPositionRowData
-  let rowData: StrategyPositionRowData | null = null;
+  const handleCollectClick = (tokenId: number) => {
+    const row = rowDataList.find((r) => r.tokenId === tokenId);
+    if (!row) return;
+    setCollectPosition({
+      tokenId,
+      token0Symbol: row.poolToken0.symbol,
+      token1Symbol: row.poolToken1.symbol,
+      token0IconUrl: row.poolToken0.iconUrl ?? "/tokens/default.png",
+      token1IconUrl: row.poolToken1.iconUrl ?? "/tokens/default.png",
+      rangeLabel: row.rangeLabel,
+      inRange: row.inRange,
+      amount0NowLabel: `${row.poolToken0.symbol} ${row.amount0Now.toFixed(2)}`,
+      amount1NowLabel: `${row.poolToken1.symbol} ${row.amount1Now.toFixed(2)}`,
+    });
+    setIsCollectOpen(true);
+  };
 
-  if (view && view.tokenId !== 0n) {
-    // !isOpen == null
-    const isEffectivelyClosed = !view.isOpen;
-
-    if (!isEffectivelyClosed) {
-      const supplyToken = getTokenMeta(view.supplyAsset);
-      const borrowToken = getTokenMeta(view.borrowAsset);
-      const poolToken0 = getTokenMeta(view.uniToken0);
-      const poolToken1 = getTokenMeta(view.uniToken1);
-
-      const inRange =
-        view.currentTick >= view.tickLower &&
-        view.currentTick <= view.tickUpper;
-
-      const rangeLabel = `${view.tickLower} ~ ${view.tickUpper}`;
-      const currentTickLabel = `Current tick ≈ ${view.currentTick}`;
-
-      rowData = {
-        tokenId: Number(view.tokenId),
-        isOpen: view.isOpen,
-
-        supplyToken,
-        borrowToken,
-        owner: view.owner,
-        vault: view.vault,
-
-        poolToken0,
-        poolToken1,
-        amount0Now: view.amount0Now,
-        amount1Now: view.amount1Now,
-        rangeLabel,
-        currentTickLabel,
-        inRange,
-
-        totalCollateralUsd: view.totalCollateralUsd,
-        totalDebtUsd: view.totalDebtUsd,
-        availableBorrowUsd: view.availableBorrowUsd,
-        ltv: view.ltv,
-        liquidationThreshold: view.liqThreshold,
-        healthFactor: view.healthFactor,
+  const handlePreviewCollect = async (): Promise<{
+    amount0Label: string;
+    amount1Label: string;
+  }> => {
+    if (!collectPosition) return { amount0Label: "0", amount1Label: "0" };
+    setIsCollectProcessing(true);
+    try {
+      const { result } = await simulateContract(wagmiConfig, {
+        ...strategyRouterContract,
+        functionName: "collectFees",
+        args: [BigInt(collectPosition.tokenId)],
+      });
+      const [raw0, raw1] = result as readonly [bigint, bigint];
+      const fmt = (v: bigint) =>
+        (Number(v) / 1e18).toLocaleString("en-US", {
+          minimumFractionDigits: 0,
+          maximumFractionDigits: 18,
+        });
+      return {
+        amount0Label: `${collectPosition.token0Symbol} ${fmt(raw0)}`,
+        amount1Label: `${collectPosition.token1Symbol} ${fmt(raw1)}`,
       };
+    } finally {
+      setIsCollectProcessing(false);
     }
-  }
+  };
 
-  const hasPosition = !!rowData && rowData.tokenId !== 0;
-  const isOpen = rowData?.isOpen ?? false;
+  const handleExecuteCollect = async (): Promise<void> => {
+    if (!collectPosition) return;
+    setIsCollectProcessing(true);
+    try {
+      const hash = await writeContract(wagmiConfig, {
+        ...strategyRouterContract,
+        functionName: "collectFees",
+        args: [BigInt(collectPosition.tokenId)],
+      });
+      if (address) {
+        postTxHint({
+          txHash: hash,
+          actionType: "COLLECT_FEES",
+          userAddress: address,
+        }).catch((err) => console.error("[tx-hint] COLLECT_FEES failed", err));
+      }
+      const receipt = await waitForTransactionReceipt(wagmiConfig, { hash });
+      if (receipt.status === "reverted") {
+        throw new Error("collectFees reverted on-chain");
+      }
+    } finally {
+      setIsCollectProcessing(false);
+    }
+  };
 
   return (
     <>
       {/* Main Card */}
       <div className="rounded-2xl border border-slate-800/60 bg-slate-950/70 shadow-sm">
-        {/* Header*/}
+        {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-800/60 px-6 py-4">
           <div className="flex flex-col">
             <h2 className="text-xl font-semibold text-slate-50">
@@ -120,29 +196,9 @@ export function StrategyPositionCard() {
               Supply → Borrow → LP on Uniswap v4
             </p>
           </div>
-
-          <div className="flex items-center gap-3">
-            {hasPosition && (
-              <span
-                className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium ${
-                  isOpen
-                    ? "bg-emerald-500/10 text-emerald-300"
-                    : "bg-slate-700/40 text-slate-300"
-                }`}
-              >
-                <span
-                  className={`h-1.5 w-1.5 rounded-full ${
-                    isOpen ? "bg-emerald-400" : "bg-slate-400"
-                  }`}
-                />
-                {isOpen ? "Open" : "Closed"}
-              </span>
-            )}
-
-            <span className="text-[11px] text-slate-500">
-              Strategy data – combined from Aave &amp; Uniswap v4
-            </span>
-          </div>
+          <span className="text-[11px] text-slate-500">
+            Strategy data – combined from Aave &amp; Uniswap v4
+          </span>
         </div>
 
         {/* Body */}
@@ -162,28 +218,58 @@ export function StrategyPositionCard() {
               Failed to load strategy position. Check your RPC settings or
               wallet connection.
             </div>
-          ) : !rowData ? (
+          ) : !hasPosition ? (
             <div className="py-8 text-center text-sm text-slate-500">
               No strategy position found yet. Open a one-shot position first.
             </div>
           ) : (
-            <StrategyPositionRow
-              data={rowData}
-              onClickPreviewClose={handlePreviewCloseClick}
-            />
+            <div className="flex flex-col divide-y divide-slate-800/60">
+              {rowDataList.map((rowData) => (
+                <div
+                  key={rowData.tokenId}
+                  className="py-5 first:pt-0 last:pb-0"
+                >
+                  <StrategyPositionRow
+                    data={rowData}
+                    onClickPreviewClose={handlePreviewCloseClick}
+                    onClickHistory={handleHistoryClick}
+                    onClickCollect={handleCollectClick}
+                  />
+                </div>
+              ))}
+            </div>
           )}
         </div>
       </div>
 
       {/* Close preview Modal */}
-      {selectedTokenId !== null && rowData && (
+      {selectedTokenId !== null && selectedRowData && (
         <ClosePositionPreviewModal
           isOpen={isCloseModalOpen}
-          onClose={handleCloseModal}
+          onClose={() => setIsCloseModalOpen(false)}
           tokenId={selectedTokenId}
-          totalDebtUsdFromCard={rowData.totalDebtUsd}
+          totalDebtUsdFromCard={selectedRowData.totalDebtUsd}
         />
       )}
+
+      {/* Snapshot history modal */}
+      {snapshotTokenId !== null && (
+        <PositionSnapshotModal
+          isOpen={isSnapshotOpen}
+          onClose={() => setIsSnapshotOpen(false)}
+          tokenId={snapshotTokenId}
+        />
+      )}
+
+      {/* Collect fees modal */}
+      <CollectFeesModal
+        isOpen={isCollectOpen}
+        onClose={() => setIsCollectOpen(false)}
+        position={collectPosition}
+        isProcessing={isCollectProcessing}
+        onPreview={handlePreviewCollect}
+        onExecute={handleExecuteCollect}
+      />
     </>
   );
 }

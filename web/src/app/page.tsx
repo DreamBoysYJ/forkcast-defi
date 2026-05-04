@@ -7,7 +7,6 @@ import { AssetsToSupplyCard } from "@/components/dashboard/AssetsToSupplyCard";
 import { AssetsToBorrowCard } from "@/components/dashboard/AssetsToBorrowCard";
 import { YourSupplyCard } from "@/components/dashboard/YourSupplyCard";
 import { YourBorrowCard } from "@/components/dashboard/YourBorrowCard";
-import { UniswapPositionCard } from "@/components/dashboard/UniswapPositionCard";
 import { StrategyPositionCard } from "@/components/dashboard/strategy/StrategyPositionCard";
 import { PositionActivitySection } from "@/components/dashboard/strategy/PositionActivitySection";
 import {
@@ -82,9 +81,6 @@ export default function Page() {
           <StrategyPositionCard />
           <PositionActivitySection />
         </section>
-
-        {/* Uniswap LP Card */}
-        <UniswapPositionCard />
 
         {/* Latest 2 LP Cards only */}
         <div className="mt-6 grid gap-4 lg:grid-cols-2 lg:gap-6">
