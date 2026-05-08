@@ -10,8 +10,9 @@ import {
 import { erc20Abi, formatUnits, parseUnits } from "viem";
 import { strategyRouterContract, strategyLensContract } from "@/lib/contracts";
 import { postTxHint } from "@/lib/backendApi";
+import { refreshActiveQueries } from "@/lib/refreshActiveQueries";
 
-import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 
 export type AssetOption = {
   symbol: string;
@@ -33,7 +34,7 @@ const HF_1E18 = 10n ** 18n;
 export function OpenPositionPreviewModal(props: OpenPositionPreviewModalProps) {
   const { isOpen, onClose, supplyOptions, borrowOptions, initialSupplySymbol } =
     props;
-  const router = useRouter();
+  const queryClient = useQueryClient();
 
   // ---- 1) Supply: AAVE만, Borrow: LINK만 사용하도록 필터 ----
   const supplyList =
@@ -304,9 +305,9 @@ export function OpenPositionPreviewModal(props: OpenPositionPreviewModalProps) {
           throw new Error("openPosition reverted on-chain");
         }
 
+        await refreshActiveQueries(queryClient);
         alert("OPEN POSITION COMPLETED!!!");
         onClose();
-        router.refresh();
       } catch (err) {
         console.error("openPosition failed", err);
         setTxError((err as any)?.shortMessage ?? (err as any)?.message ?? "Transaction failed");

@@ -2,6 +2,7 @@
 "use client";
 
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAccount, useConfig } from "wagmi";
 import {
   simulateContract,
@@ -19,6 +20,7 @@ import type { UniPositionRowData } from "@/components/dashboard/UniswapPositionR
 import { useStrategyPositionView } from "@/hooks/useStrategyPositionView";
 import { strategyRouterContract } from "@/lib/contracts";
 import { postTxHint } from "@/lib/backendApi";
+import { refreshActiveQueries } from "@/lib/refreshActiveQueries";
 
 const TOKEN_META: Record<string, { symbol: string; iconUrl: string }> = {
   [(process.env.NEXT_PUBLIC_AAVE_UNDERLYING_SEPOLIA ?? "").toLowerCase()]: {
@@ -79,6 +81,7 @@ function toRowData(
 export function StrategyPositionCard() {
   const { views, isLoading, isError, isRateLimited } = useStrategyPositionView();
   const wagmiConfig = useConfig();
+  const queryClient = useQueryClient();
   const { address } = useAccount();
 
   // Close modal
@@ -177,6 +180,7 @@ export function StrategyPositionCard() {
       if (receipt.status === "reverted") {
         throw new Error("collectFees reverted on-chain");
       }
+      await refreshActiveQueries(queryClient);
     } finally {
       setIsCollectProcessing(false);
     }

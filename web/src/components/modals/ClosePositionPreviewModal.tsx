@@ -7,7 +7,8 @@ import { readContract, waitForTransactionReceipt } from "@wagmi/core";
 import { parseUnits } from "viem";
 import { strategyRouterContract } from "@/lib/contracts";
 import { postTxHint } from "@/lib/backendApi";
-import { useRouter } from "next/navigation";
+import { refreshActiveQueries } from "@/lib/refreshActiveQueries";
+import { useQueryClient } from "@tanstack/react-query";
 
 // FOR DEMO (V1) : Only Use AAVE/LINK
 const TOKEN_META: Record<
@@ -113,7 +114,7 @@ export function ClosePositionPreviewModal(
   props: ClosePositionPreviewModalProps
 ) {
   const { isOpen, onClose, tokenId, totalDebtUsdFromCard } = props;
-  const router = useRouter();
+  const queryClient = useQueryClient();
 
   const { address: wallet } = useAccount();
   const wagmiConfig = useConfig();
@@ -323,7 +324,7 @@ export function ClosePositionPreviewModal(
     !hasPreview ||
     isLoadingPreview ||
     isRunningTx ||
-    insufficientBalance ||
+    (phase === "close" && insufficientBalance) ||
     extraAmount < 0;
 
   if (mode === "done") {
@@ -397,9 +398,9 @@ export function ClosePositionPreviewModal(
           throw new Error("closePosition reverted on-chain");
         }
 
+        await refreshActiveQueries(queryClient);
         alert("CLOSE POSITION COMPLETED!");
         onClose();
-        router.refresh();
         setMode("done");
       } catch (e) {
         console.error("[ClosePreview] closePosition failed", e);
