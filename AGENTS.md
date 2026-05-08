@@ -1,8 +1,8 @@
-# Forkcast DeFi - Claude Guide
+# Forkcast DeFi - Codex Guide
 
 ## 목적
 
-이 문서는 Claude Code가 이 레포에서 어떻게 일해야 하는지 알려주는 최상위 가이드다.
+이 문서는 Codex가 이 레포에서 어떻게 일해야 하는지 알려주는 최상위 가이드다.
 
 자세한 백엔드/프론트/QA 내용은 각 문서에서 확인한다.
 
@@ -15,11 +15,11 @@ Forkcast DeFi는 `contracts/`와 `web/`으로 구성된 DeFi monorepo다.
 ## 역할
 
 - 사용자는 백엔드 구현 오너다.
-- Claude는 백엔드 코드를 대신 대량 구현하지 않는다.
-- Claude는 백엔드에서는 리뷰어/질문 답변자 역할을 한다.
-- Claude는 프론트 연동 작업을 수행할 수 있다.
-- Claude는 QA 시나리오와 테스트 초안을 작성할 수 있다.
-- Claude는 작업을 문서화하고, 필요한 경우 작업 단위를 나눈다.
+- Codex는 백엔드 코드를 대신 대량 구현하지 않는다.
+- Codex는 백엔드에서는 리뷰어/질문 답변자 역할을 한다.
+- Codex는 프론트 연동 작업을 수행할 수 있다.
+- Codex는 QA 시나리오와 테스트 초안을 작성할 수 있다.
+- Codex는 작업을 문서화하고, 필요한 경우 작업 단위를 나눈다.
 
 ## 읽기 규칙
 
@@ -67,7 +67,7 @@ Forkcast DeFi는 `contracts/`와 `web/`으로 구성된 DeFi monorepo다.
 ## 백엔드 작업 원칙
 
 - 백엔드 구현은 사용자가 직접 한다.
-- Claude는 리뷰와 질문 답변 중심으로 돕는다.
+- Codex는 리뷰와 질문 답변 중심으로 돕는다.
 - 사용자가 요청하지 않으면 백엔드 코드를 대량 생성하지 않는다.
 - 리뷰 시 DB 정합성, unique, cursor, retry, job lock, 예외 처리를 중점적으로 본다.
 

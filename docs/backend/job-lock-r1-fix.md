@@ -1,96 +1,96 @@
-# Job Lock R1 Fix Note
+# job_lock R1 수정 메모
 
-> Date: 2026-05-08
-> Scope: `job_lock` release blocker (`R1`) explanation and fix summary
-
----
-
-## 1. What Was The Problem?
-
-`event-sync` and `snapshot` both rely on `job_lock` to prevent overlapping runs.
-
-The original code had a risky shape:
-
-1. job starts
-2. `jobLockService.tryAcquire(...)` runs
-3. long RPC work starts
-4. transaction commits only at the end
-
-This meant the lock row was not durably committed before the long-running work began.
-
-As a result, another request could still arrive and observe the old lock state.
-
-That weakens the main protection against duplicate scheduler execution.
+> 날짜: 2026-05-08
+> 범위: `job_lock` release blocker (`R1`) 문제 설명과 수정 요약
 
 ---
 
-## 2. Why This Was Dangerous
+## 1. 어떤 문제가 있었나
 
-In production, overlap can happen in realistic situations:
+`event-sync`와 `snapshot`은 둘 다 중복 실행을 막기 위해 `job_lock`에 의존한다.
 
-- Cloud Scheduler triggers the next run while the previous run is still running
-- Scheduler retry happens after timeout or network issue
-- operator manually re-runs the job
-- Cloud Run serves near-simultaneous requests on different instances
+기존 코드는 대략 이런 흐름이었다.
 
-If the lock is not committed early enough, two runs may both believe they can proceed.
+1. job 시작
+2. `jobLockService.tryAcquire(...)` 호출
+3. 오래 걸릴 수 있는 RPC 작업 시작
+4. 전체 트랜잭션이 맨 마지막에 커밋
+
+이 구조에서는 long-running work가 시작되기 전에 lock row가 DB에 확정 저장되지 않을 수 있었다.
+
+그 결과, 거의 비슷한 시점에 들어온 다른 요청이 아직 예전 lock 상태를 보고 같은 job을 다시 시작할 여지가 있었다.
+
+즉, scheduler 중복 실행 방어의 핵심 장치가 충분히 강하지 않았다.
 
 ---
 
-## 3. Root Cause
+## 2. 왜 위험했나
 
-The root cause was not the `job_lock` table schema itself.
+운영 환경에서는 job 겹침이 생각보다 현실적으로 발생할 수 있다.
 
-The table already had the needed columns:
+- Cloud Scheduler가 다음 주기를 호출했는데 이전 실행이 아직 끝나지 않은 경우
+- timeout이나 네트워크 문제 뒤 scheduler retry가 들어오는 경우
+- 운영자가 수동으로 다시 실행하는 경우
+- Cloud Run의 다른 인스턴스로 거의 동시에 요청이 들어오는 경우
+
+이때 lock이 충분히 일찍 커밋되지 않으면, 두 실행이 모두 "내가 실행해도 된다"고 판단할 수 있다.
+
+---
+
+## 3. 근본 원인은 무엇이었나
+
+문제의 핵심은 `job_lock` 테이블 스키마 부족이 아니었다.
+
+테이블에는 이미 필요한 컬럼이 있었다.
 
 - `job_name`
 - `locked_until`
 - `locked_by`
 - `updated_at`
 
-The real problem was the runtime behavior:
+실제 문제는 런타임 동작 방식이었다.
 
-1. `EventSyncService` and `SnapshotService` were transactional across the whole job
-2. `tryAcquire(...)` joined that same transaction
-3. lock state was not committed before RPC work
-4. acquire logic used read-then-write style instead of one atomic DB statement
+1. `EventSyncService`와 `SnapshotService`가 job 전체를 하나의 트랜잭션으로 잡고 있었다.
+2. `tryAcquire(...)`가 그 같은 트랜잭션 안에 참여했다.
+3. lock 상태가 RPC 작업 전에 별도로 커밋되지 않았다.
+4. acquire 로직이 read-then-write 방식이라 DB 원자성이 약했다.
 
-So the issue was mainly:
+즉 이 문제는 주로 아래 두 가지 문제였다.
 
-- transaction boundary
-- atomicity of lock acquire
+- 트랜잭션 경계
+- lock acquire 원자성
 
 ---
 
-## 4. What Changed
+## 4. 어떻게 바꿨나
 
-The fix used three changes together.
+이번 수정은 세 가지를 같이 적용했다.
 
-### 4-1. Lock acquire is now separately committed
+### 4-1. lock acquire를 별도 트랜잭션으로 커밋하게 바꿨다
 
-`JobLockService.tryAcquire(...)` now runs in:
+`JobLockService.tryAcquire(...)`는 이제 아래처럼 동작한다.
 
 ```java
 @Transactional(propagation = Propagation.REQUIRES_NEW)
 ```
 
-Meaning:
+의미는 이렇다.
 
-- lock acquire gets its own transaction
-- it commits immediately
-- only after that does the outer job continue
+- lock acquire는 자기만의 트랜잭션을 가진다.
+- 호출이 끝나면 바로 커밋된다.
+- 그 다음에야 바깥 job 로직이 계속 진행된다.
 
-So the lock becomes visible to other requests before long RPC work starts.
+그래서 긴 RPC 작업이 시작되기 전에 lock 상태가 다른 요청에도 보이게 된다.
 
-### 4-2. Lock acquire is now atomic in SQL
+### 4-2. lock acquire를 SQL 한 번으로 처리하게 바꿨다
 
-Instead of:
+기존처럼
 
 - `findById()`
-- check expiration in Java
-- then `save()`
+- 자바에서 만료 여부 확인
+- `save()`
 
-the code now uses one PostgreSQL upsert statement:
+이렇게 나누지 않고, PostgreSQL upsert 한 문장으로 처리하게 바꿨다.
 
 ```sql
 INSERT INTO job_lock (job_name, locked_until, locked_by, updated_at)
@@ -102,148 +102,152 @@ ON CONFLICT (job_name) DO UPDATE
 WHERE job_lock.locked_until <= :now
 ```
 
-This means:
+이 쿼리 의미는 다음과 같다.
 
-1. if no row exists, insert succeeds
-2. if a row exists but the lease is expired, update succeeds
-3. if a row exists and the lease is still active, nothing updates
+1. row가 없으면 insert 성공
+2. row가 있지만 lease가 이미 만료됐으면 update 성공
+3. row가 있고 lease도 아직 살아 있으면 아무 것도 업데이트하지 않음
 
-So acquire succeeds only when the lock is free or expired.
+즉, lock이 비어 있거나 만료된 경우에만 acquire가 성공한다.
 
-### 4-3. Release is owner-aware
+### 4-3. release를 owner-aware 하게 바꿨다
 
-Each run now generates a unique lock owner token, currently via UUID.
+각 실행은 이제 UUID 기반의 고유한 owner token을 하나 만든다.
 
-Release no longer means:
+release는 더 이상
 
-- "unlock by job name only"
+- "job 이름만 보고 풀기"
 
-It now means:
+가 아니다.
 
-- "unlock only if this run is still the owner"
+이제는
 
-So release uses both:
+- "지금 이 실행이 아직 lock 주인일 때만 풀기"
+
+가 된다.
+
+그래서 release 조건에는 둘 다 들어간다.
 
 - `job_name`
 - `locked_by`
 
-This prevents an older run from releasing a newer run's lock after lease expiry.
+이렇게 해야 lease 만료 후 새 실행이 잡은 lock을 예전 실행이 실수로 풀어버리지 않는다.
 
 ---
 
-## 5. Why `locked_by` And UUID Matter
+## 5. 왜 `locked_by`와 UUID가 중요한가
 
-This part is easy to miss.
+이 부분이 제일 놓치기 쉽다.
 
-Imagine:
+예를 들어:
 
-1. run A acquires lock
-2. run A is still working
-3. lease expires
-4. run B acquires the same lock
-5. run A finishes late and tries to release
+1. 실행 A가 lock 획득
+2. 실행 A가 아직 작업 중
+3. lease 만료
+4. 실행 B가 같은 lock을 새로 획득
+5. 실행 A가 늦게 끝나서 release 시도
 
-If release only checks `job_name`, run A could accidentally clear run B's lock.
+이때 release가 `job_name`만 보고 동작하면, A가 B의 lock까지 풀어버릴 수 있다.
 
-That is why each run needs its own owner token.
+그래서 각 실행은 자기만의 owner token이 필요하다.
 
-Example:
+예:
 
-- run A owner: `uuid-a`
-- run B owner: `uuid-b`
+- 실행 A owner: `uuid-a`
+- 실행 B owner: `uuid-b`
 
-Release must update only when:
+release는 반드시 아래 조건일 때만 성공해야 한다.
 
 ```sql
 where job_name = :jobName
   and locked_by = :lockedBy
 ```
 
-Then run A cannot release run B's lock.
+이렇게 해야 실행 A가 실행 B의 lock을 해제하지 못한다.
 
 ---
 
-## 6. What "Release" Means In This Design
+## 6. 이 설계에서 release는 무슨 뜻인가
 
-This codebase uses a lease-based lock.
+이 코드베이스는 lease-based lock을 사용한다.
 
-So release does not delete the row.
+즉 release는 row를 삭제하는 방식이 아니다.
 
-Instead, release means:
+release는 아래 뜻이다.
 
-- set `locked_until = now()`
+- `locked_until = now()`로 바꾸기
 
-Why that works:
+왜 이게 unlock이 되냐면 판단 기준이 이렇기 때문이다.
 
-- `locked_until > now()` means lock is still active
-- `locked_until <= now()` means lock is available again
+- `locked_until > now()` 이면 lock이 아직 살아 있음
+- `locked_until <= now()` 이면 lock을 다시 잡을 수 있음
 
-So unlocking is implemented by moving the lease end time to the present.
+즉 unlock은 lease 종료 시점을 현재 시각으로 당겨서, 더 이상 유효하지 않은 lock으로 만드는 방식이다.
 
 ---
 
-## 7. Files Changed For The Fix
+## 7. 이번 수정에서 바뀐 파일
 
-The core R1 fix touched these files:
+핵심 R1 수정 파일:
 
 - `backend/src/main/java/io/forkcast/backend/job/repository/JobLockRepository.java`
 - `backend/src/main/java/io/forkcast/backend/job/service/JobLockService.java`
 - `backend/src/main/java/io/forkcast/backend/sync/service/EventSyncService.java`
 - `backend/src/main/java/io/forkcast/backend/snapshot/service/SnapshotService.java`
 
-Test file added:
+추가한 테스트 파일:
 
 - `backend/src/test/java/io/forkcast/backend/job/service/JobLockServiceTest.java`
 
 ---
 
-## 8. How The Fix Was Verified
+## 8. 어떻게 검증했나
 
-The following tests were added:
+아래 테스트를 추가했다.
 
-1. acquire succeeds once, then fails while lease is still active
-2. release with the wrong owner does not unlock
-3. release with the correct owner unlocks
+1. 첫 acquire는 성공하고, lease가 살아있는 동안 두 번째 acquire는 실패해야 한다.
+2. owner가 다른 release는 lock을 풀지 못해야 한다.
+3. owner가 같은 release만 lock을 풀 수 있어야 한다.
 
-Executed command:
+실행한 명령:
 
 ```bash
 ./gradlew test --tests io.forkcast.backend.job.service.JobLockServiceTest
 ```
 
-Result:
+결과:
 
-- test passed
-
----
-
-## 9. What This Fix Does Not Solve
-
-This fix specifically addresses `R1`: unsafe lock commit timing and unsafe lock ownership.
-
-It does not fully solve:
-
-- `job_run` rollback risk (`R3`)
-- long snapshot transaction scope (`R4`)
-- lease extension for very long-running jobs
-- end-to-end overlap testing for full scheduler flows
-
-So this is an important safety fix, but not the end of scheduler hardening work.
+- 테스트 통과
 
 ---
 
-## 10. Short Summary
+## 9. 이 수정이 아직 해결하지 않는 것
 
-The bug was:
+이번 수정은 `R1`, 즉 lock commit timing과 lock ownership 문제를 해결하는 데 집중했다.
 
-- lock acquire existed
-- but it was not committed early enough
-- and release was not owner-safe
+아직 완전히 해결하지 않는 것은 다음과 같다.
 
-The fix was:
+- `job_run` rollback 위험 (`R3`)
+- `snapshot`의 긴 트랜잭션 범위 (`R4`)
+- 아주 오래 걸리는 job에서의 lease 연장 문제
+- 전체 scheduler flow 기준 엔드투엔드 overlap 테스트
 
-- commit lock acquire in its own transaction
-- use one atomic SQL statement for acquire
-- release only when `locked_by` still matches the current run
+즉, 이번 수정은 중요한 안전성 보강이지만 scheduler hardening 전체의 끝은 아니다.
 
-That makes `job_lock` much safer against overlapping scheduler requests.
+---
+
+## 10. 짧은 요약
+
+문제는 이랬다.
+
+- lock acquire 자체는 있었지만
+- 충분히 빨리 커밋되지 않았고
+- release도 owner 안전성이 부족했다.
+
+해결은 이렇게 했다.
+
+- lock acquire를 자기만의 트랜잭션에서 먼저 커밋
+- acquire를 원자적 SQL 한 문장으로 처리
+- `locked_by`가 현재 실행과 일치할 때만 release
+
+그 결과 `job_lock`은 겹치는 scheduler 요청에 대해 훨씬 더 안전해졌다.

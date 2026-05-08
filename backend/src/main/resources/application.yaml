@@ -1,0 +1,35 @@
+spring:
+  application:
+    name: backend
+
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/forkcast_defi
+    username: forkcast_app
+    password: 1234
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+
+  flyway:
+    enabled: true
+
+sync:
+  bootstrap-window-blocks: ${SYNC_BOOTSTRAP_WINDOW_BLOCKS:25}
+  rpc:
+    url: ${RPC_URL}
+  contracts:
+    strategy-router-address: ${STRATEGY_ROUTER_ADDRESS}
+    hook-address: ${HOOK_ADDRESS}
+
+scheduler:
+  auth:
+    enabled: ${SCHEDULER_AUTH_ENABLED:false}
+    allowed-service-account: ${SCHEDULER_AUTH_ALLOWED_SERVICE_ACCOUNT:}
+    audience: ${SCHEDULER_AUTH_AUDIENCE:}
+
+app:
+  cors:
+    allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:http://localhost:3000}

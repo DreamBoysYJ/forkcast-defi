@@ -313,10 +313,7 @@ Endpoint:
 Cases:
 - valid tokenId returns timeline
 - invalid tokenId returns 400
-- unknown tokenId returns 404 or empty list depending on decision
-
-Recommended v1:
-- unknown tokenId returns 404 if strategy_position is missing
+- unknown tokenId returns empty list (`[]`)
 
 ---
 
