@@ -11,16 +11,18 @@ import io.forkcast.backend.snapshot.client.StrategyLensClient;
 import io.forkcast.backend.snapshot.domain.PositionSnapshot;
 import io.forkcast.backend.snapshot.repository.PositionSnapshotRepository;
 import io.forkcast.backend.sync.client.Web3jChainClient;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
 @Service
-@Transactional
+@Slf4j
 public class SnapshotService {
   private static final String JOB_NAME = "snapshot";
   private static final String LOCKED_BY = "local-instance";
@@ -31,15 +33,18 @@ public class SnapshotService {
   private final Web3jChainClient web3jChainClient;
   private final StrategyPositionRepository strategyPositionRepository;
   private final StrategyLensClient strategyLensClient;
+  private final SnapshotWriteService snapshotWriteService;
 
-  public SnapshotService(JobLockService jobLockService, JobRunService jobRunService, PositionSnapshotRepository positionSnapshotRepository, Web3jChainClient web3jChainClient, StrategyPositionRepository strategyPositionRepository, StrategyLensClient strategyLensClient) {
+  public SnapshotService(JobLockService jobLockService, JobRunService jobRunService, PositionSnapshotRepository positionSnapshotRepository, Web3jChainClient web3jChainClient, StrategyPositionRepository strategyPositionRepository, StrategyLensClient strategyLensClient, SnapshotWriteService snapshotWriteService) {
     this.jobLockService = jobLockService;
     this.jobRunService = jobRunService;
     this.positionSnapshotRepository = positionSnapshotRepository;
     this.web3jChainClient = web3jChainClient;
     this.strategyPositionRepository = strategyPositionRepository;
     this.strategyLensClient = strategyLensClient;
+    this.snapshotWriteService = snapshotWriteService;
   }
+
 
   public SnapshotResult run() {
     Instant startedAt = Instant.now();
@@ -69,48 +74,64 @@ public class SnapshotService {
       jobRun = jobRunService.start(JOB_NAME, null, null);
 
       List<StrategyPosition> openPositions = strategyPositionRepository.findByIsOpenTrue();
+      List<PositionSnapshot> snapshots = new ArrayList<>();
+      int failedPositions = 0;
 
-      int snapshottedPositions = 0;
+//      int snapshottedPositions = 0;
 
       for (StrategyPosition position : openPositions) {
-        if (positionSnapshotRepository.existsByTokenIdAndSnapshotAt(position.getTokenId(), snapshotAt)) {
-          continue;
+        try {
+          StrategyLensClient.PositionState state = strategyLensClient.getPositionState(
+            position.getOwnerAddress(),
+            position.getTokenId(),
+            observedBlockNumber
+          );
+
+          PositionSnapshot snapshot = new PositionSnapshot(
+            position.getTokenId(),
+            position.getOwnerAddress(),
+            position.getVaultAddress(),
+            position.getSupplyAsset(),
+            position.getBorrowAsset(),
+            position.isOpen(),
+            state.liquidity(),
+            state.amount0Now(),
+            state.amount1Now(),
+            state.currentTick(),
+            state.sqrtPriceX96(),
+            state.totalCollateralBase(),
+            state.totalDebtBase(),
+            state.healthFactor(),
+            snapshotAt,
+            observedBlockNumber
+          );
+
+          snapshots.add(snapshot);
+        } catch (Exception e) {
+          failedPositions++;
+          log.warn(
+            "failed to collect snapshot. tokenId={}, ownerAddress={}",
+            position.getTokenId(),
+            position.getOwnerAddress(),
+            e
+          );
         }
-
-        StrategyLensClient.PositionState state = strategyLensClient.getPositionState(
-          position.getOwnerAddress(),
-          position.getTokenId(),
-          observedBlockNumber
-        );
-
-        PositionSnapshot snapshot = new PositionSnapshot(
-          position.getTokenId(),
-          position.getOwnerAddress(),
-          position.getVaultAddress(),
-          position.getSupplyAsset(),
-          position.getBorrowAsset(),
-          position.isOpen(),
-          state.liquidity(),
-          state.amount0Now(),
-          state.amount1Now(),
-          state.currentTick(),
-          state.sqrtPriceX96(),
-          state.totalCollateralBase(),
-          state.totalDebtBase(),
-          state.healthFactor(),
-          snapshotAt,
-          observedBlockNumber
-        );
-
-        positionSnapshotRepository.save(snapshot);
-        snapshottedPositions++;
       }
 
+      snapshotWriteService.saveAll(snapshots);
       jobRunService.markSuccess(jobRun.getId());
+
+      if (failedPositions > 0) {
+        log.warn(
+          "snapshot completed with partial failures. successCount={}, failedCount={}",
+          snapshots.size(),
+          failedPositions
+        );
+      }
 
       return SnapshotResult.success(
         JOB_NAME,
-        snapshottedPositions,
+        snapshots.size(),
         observedBlockNumber,
         startedAt,
         Instant.now()
@@ -121,6 +142,7 @@ public class SnapshotService {
           jobRunService.markFailed(jobRun.getId(), e.getMessage());
 
         } catch (Exception logFailure) {
+          log.warn("failed to mark snapshot job_run as FAILED. jobRunId={}", jobRun.getId(), logFailure);
 
         }
       }

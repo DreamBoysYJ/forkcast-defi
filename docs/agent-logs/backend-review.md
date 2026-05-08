@@ -458,3 +458,37 @@
 ### 남은 문제
 
 - 현재 문서는 R3 중심이라 `R4` 같은 다음 운영 리스크까지는 다루지 않는다.
+
+## 2026-05-08 — snapshot R4 설명 문서와 테스트 추가
+
+### 작업 목적
+
+`snapshot` job의 긴 트랜잭션 / 부분 실패 문제(`R4`)를 복습용 문서로 정리하고, 새 구조가 실제로 부분 실패를 허용하는지 테스트로 확인한다.
+
+### 읽은 파일
+
+- `backend/src/main/java/io/forkcast/backend/snapshot/service/SnapshotService.java`
+- `backend/src/main/java/io/forkcast/backend/snapshot/service/SnapshotWriteService.java`
+- `backend/src/test/java/io/forkcast/backend/snapshot/service/SnapshotServiceTest.java`
+- `docs/agent-logs/backend-review.md`
+
+### 변경한 파일
+
+- `docs/backend/snapshot-r4-fix.md`
+- `docs/agent-logs/backend-review.md`
+
+### 한 일
+
+- `snapshot` R4 문제를 별도 한글 문서로 정리했다.
+- 왜 긴 트랜잭션이 문제였는지, 왜 이번 단계에서는 chunk보다 `collect all + saveAll`을 택했는지, 왜 `SnapshotWriteService`를 따로 만들었는지를 문서에 적었다.
+- `SnapshotServiceTest`로 "한 포지션 RPC 성공, 한 포지션 RPC 실패" 시나리오에서 성공한 snapshot만 저장되고 job 자체는 성공 처리되는지를 검증했다.
+- `./gradlew test --tests io.forkcast.backend.snapshot.service.SnapshotServiceTest` 실행으로 테스트 통과를 확인했다.
+
+### 왜 그렇게 했는지
+
+- 이번 문제는 단순히 코드를 바꾼 것보다 "실패 범위를 어떻게 줄였는가"를 설명할 수 있어야 의미가 있다.
+- 면접이나 회고에서는 기술 선택의 이유와 trade-off를 같이 말할 수 있어야 하므로, 설명 문서와 테스트를 함께 남기는 편이 좋다.
+
+### 남은 문제
+
+- 현재 문서는 `collect all + saveAll` 기준 1차 해결 정리라, 향후 포지션 수가 크게 늘면 chunk/병렬화 재검토가 필요할 수 있다.
