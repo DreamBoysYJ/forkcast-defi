@@ -11,8 +11,10 @@ import {
 import { sepolia } from "viem/chains";
 import { privateKeyToAccount } from "viem/accounts";
 
-import { erc20Abi } from "@/abi/erc20Abi";
 import { miniV4SwapRouterAbi } from "@/abi/MiniV4SwapRouterAbi";
+
+const DEMO_TRADER_ADDRESS =
+  "0xde589C867174C349d00e9b582867aF5c13A74679" as const;
 
 // -------------------------------
 // 1) 공용(프론트+서버) 주소 계열 env
@@ -102,6 +104,9 @@ function getServerClients() {
   }
 
   const account = privateKeyToAccount(demoPk as `0x${string}`);
+  if (account.address.toLowerCase() !== DEMO_TRADER_ADDRESS.toLowerCase()) {
+    throw new Error("Configured demo trader key does not match expected address");
+  }
 
   const publicClient = createPublicClient({
     chain: sepolia,
@@ -164,17 +169,7 @@ export async function runDemoTrade() {
       } | zeroForOne=${zeroForOne} | inToken=${inToken}`
     );
 
-    // 1) inToken → mini router approve
-    const approveHash = await walletClient.writeContract({
-      abi: erc20Abi,
-      address: inToken,
-      functionName: "approve",
-      args: [MINI_SWAP_ROUTER_ADDRESS, amountPerSwap],
-    });
-    console.log("[demoTrader] approve tx:", approveHash);
-    await publicClient.waitForTransactionReceipt({ hash: approveHash });
-
-    // 2) swapExactInputSingle 호출
+    // Assumes both tokens were pre-approved for the router out of band.
     const swapHash = await walletClient.writeContract({
       abi: miniV4SwapRouterAbi,
       address: MINI_SWAP_ROUTER_ADDRESS,

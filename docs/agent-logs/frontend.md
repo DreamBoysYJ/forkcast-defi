@@ -1,5 +1,24 @@
 # Frontend Agent Log
 
+## 2026-05-08 demo trader 사전 approve 전제 반영 ✓
+
+- 작업 목적
+  - demo trader 실행 때마다 발생하던 ERC-20 approve tx 2개를 제거하고, 미리 approve된 전용 지갑만 쓰도록 정리
+- 읽은 파일
+  - `docs/frontend/backend-integration-plan.md`
+  - `web/src/lib/demoTrader.ts`
+- 변경한 파일
+  - `web/src/lib/demoTrader.ts`
+  - `docs/agent-logs/frontend.md`
+- 한 일
+  - demo trader가 더 이상 매 실행마다 `approve(AAVE)` / `approve(LINK)`를 보내지 않도록 approve 블록을 제거했다
+  - 주어진 demo trader 공개 주소 `0xde589C867174C349d00e9b582867aF5c13A74679`를 상수로 두고, 서버에 설정된 private key가 이 주소와 일치하는지 검증하도록 추가했다
+- 왜 그렇게 했는지
+  - 버튼 한 번에 불필요한 tx 두 건이 더 나가고, allowance가 이미 충분한 상황에서도 매번 approve를 반복하는 구조였기 때문이다
+  - 공개 주소만 코드에 고정하고 실제 서명키는 서버 env로 유지하면, 원하는 계정을 강제하면서도 비밀키를 코드에 넣지 않아도 된다
+- 남은 문제
+  - 운영 배포 환경의 `DEMO_TRADER_PRIVATE_KEY`도 위 공개 주소와 짝이 맞게 설정돼 있어야 한다
+
 ## 2026-05-04 Position activity 섹션 — 전체 포지션 accordion 구조로 변경 ✓
 
 - 작업 목적
