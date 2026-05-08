@@ -1,5 +1,50 @@
 # Frontend Agent Log
 
+## 2026-05-08 ClosePositionPreviewModal approve 버튼 비활성화 버그 수정
+
+- 작업 목적
+  - close position preview에서 approve 버튼이 잔고 부족으로 비활성화되는 문제 수정
+- 읽은 파일
+  - `web/src/components/modals/ClosePositionPreviewModal.tsx`
+- 변경한 파일
+  - `web/src/components/modals/ClosePositionPreviewModal.tsx`
+- 한 일
+  - `isPrimaryDisabled` 조건에서 `insufficientBalance` 체크를 `phase === "close"` 일 때만 적용하도록 수정
+- 왜 그렇게 했는지
+  - `extraAmountInput` 기본값이 `maxExtraFromUser`(이론상 최대치)로 세팅되는데, 이 값이 지갑 잔고보다 크면 모달 열자마자 approve 버튼이 비활성화됨
+  - `approve()`는 잔고를 확인하지 않고 allowance만 세팅하므로 잔고보다 많은 금액도 approve 가능
+  - 잔고 부족 체크는 실제 토큰을 써야 하는 `closePosition()` 단계(close phase)에서만 의미 있음
+- 남은 문제
+  - 없음
+
+---
+
+## 2026-05-08 tx 성공 후 on-chain 화면 즉시 재조회 연결 ✓
+
+- 작업 목적
+  - open/close/collect 트랜잭션 성공 후 새로고침 없이 포지션 UI가 바로 갱신되게 한다
+- 읽은 파일
+  - `docs/frontend/backend-integration-plan.md`
+  - `web/src/components/modals/OpenPositionPreviewModal.tsx`
+  - `web/src/components/modals/ClosePositionPreviewModal.tsx`
+  - `web/src/components/dashboard/strategy/StrategyPositionCard.tsx`
+  - `web/src/hooks/useStrategyPositionView.ts`
+  - `web/src/components/dashboard/strategy/PositionActivitySection.tsx`
+- 변경한 파일
+  - `web/src/lib/refreshActiveQueries.ts`
+  - `web/src/components/modals/OpenPositionPreviewModal.tsx`
+  - `web/src/components/modals/ClosePositionPreviewModal.tsx`
+  - `web/src/components/dashboard/strategy/StrategyPositionCard.tsx`
+  - `docs/agent-logs/frontend.md`
+- 한 일
+  - `router.refresh()`에 의존하던 tx 성공 후 처리 대신, 공용 helper로 active query들을 invalidate하도록 연결했다
+  - `openPosition`, `closePosition`, `collectFees` 성공 시 wagmi/react-query 기반 조회가 즉시 다시 실행되도록 바꿨다
+- 왜 그렇게 했는지
+  - 현재 페이지는 클라이언트 컴포넌트와 wagmi read query 중심이라 `router.refresh()`만으로는 on-chain 카드 캐시가 바로 갱신되지 않았다
+  - 같은 QueryClient를 쓰는 active query를 직접 invalidate하는 쪽이 트랜잭션 직후 UI 반영에 더 직접적이다
+- 남은 문제
+  - 백엔드 기반 타임라인/스냅샷은 인덱싱 지연이 있으면 즉시 반영되지 않을 수 있다
+
 ## 2026-05-08 demo trader 사전 approve 전제 반영 ✓
 
 - 작업 목적
