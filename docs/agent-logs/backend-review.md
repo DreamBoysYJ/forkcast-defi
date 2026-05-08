@@ -394,3 +394,67 @@
 ### 남은 문제
 
 - 현재 문서는 R1 중심 설명 문서라 `R3`, `R4`의 후속 설계까지는 다루지 않는다.
+
+## 2026-05-08 — job_lock R1 설명 문서 한글화
+
+### 작업 목적
+
+`docs/backend/job-lock-r1-fix.md`를 한국어로 바꿔서 이후 재확인할 때 더 빠르게 읽히게 만든다.
+
+### 읽은 파일
+
+- `docs/backend/job-lock-r1-fix.md`
+- `docs/agent-logs/backend-review.md`
+
+### 변경한 파일
+
+- `docs/backend/job-lock-r1-fix.md`
+- `docs/agent-logs/backend-review.md`
+
+### 한 일
+
+- `job_lock` R1 설명 문서의 제목과 본문을 전부 한국어로 옮겼다.
+- 기존 구조는 유지하되, 문제 상황, 원인, `REQUIRES_NEW`, `ON CONFLICT`, UUID owner, release 의미가 자연스럽게 읽히도록 표현을 다듬었다.
+
+### 왜 그렇게 했는지
+
+- 이 문서는 구현 코드를 고치는 순간보다, 나중에 다시 배경을 떠올릴 때 더 자주 쓰일 가능성이 높다.
+- 영어보다 한글이 빠르게 들어오도록 바꿔두는 편이 실제 유지보수에 더 도움이 된다.
+
+### 남은 문제
+
+- 내용은 한글화되었지만, 이후 설계가 더 바뀌면 문서도 함께 업데이트해야 한다.
+
+## 2026-05-08 — job_run R3 설명 문서 추가
+
+### 작업 목적
+
+`job_run` 실패 이력 롤백 문제를 면접이나 복습 때 바로 설명할 수 있도록 별도 한글 문서로 정리한다.
+
+### 읽은 파일
+
+- `backend/src/main/java/io/forkcast/backend/job/service/JobRunService.java`
+- `backend/src/main/java/io/forkcast/backend/sync/service/EventSyncService.java`
+- `backend/src/main/java/io/forkcast/backend/snapshot/service/SnapshotService.java`
+- `backend/src/test/java/io/forkcast/backend/job/service/JobRunServiceTest.java`
+- `docs/agent-logs/backend-review.md`
+
+### 변경한 파일
+
+- `docs/backend/job-run-r3-fix.md`
+- `docs/agent-logs/backend-review.md`
+
+### 한 일
+
+- `job_run` R3 문제를 복습용 문서로 따로 정리했다.
+- 문제 발견 배경, 기존 트랜잭션 구조, 왜 `markFailed()`만 `REQUIRES_NEW`로는 부족한지, 최종 수정 방향, 테스트 검증 내용을 한 문서에 모았다.
+- 마지막에는 면접에서 짧게 말할 수 있는 답변 형태도 함께 적어뒀다.
+
+### 왜 그렇게 했는지
+
+- 이번 문제는 코드 diff보다 "왜 이렇게 바꿔야 하는가"를 설명하는 능력이 더 중요하다.
+- 면접이나 회고에서는 발견 과정과 원인 분석, 검증 방식까지 한 흐름으로 설명할 수 있어야 한다.
+
+### 남은 문제
+
+- 현재 문서는 R3 중심이라 `R4` 같은 다음 운영 리스크까지는 다루지 않는다.

@@ -198,8 +198,10 @@ public class EventSyncService {
 
     } catch (Exception e) {
       if (jobRun != null){
-        jobRunService.markFailed(jobRun.getId() , e.getMessage());
-
+        try {
+          jobRunService.markFailed(jobRun.getId(), e.getMessage());
+        } catch (Exception logFailure) {
+        }
       }
       throw e;
     } finally {
