@@ -37,6 +37,8 @@ export type StrategyPositionRowData = {
 type Props = {
   data: StrategyPositionRowData;
   onClickPreviewClose?: (tokenId: number) => void;
+  onClickHistory?: (tokenId: number) => void;
+  onClickCollect?: (tokenId: number) => void;
 };
 
 function formatUsd(v: number) {
@@ -55,7 +57,7 @@ function shortAddr(addr: string) {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 }
 
-export function StrategyPositionRow({ data, onClickPreviewClose }: Props) {
+export function StrategyPositionRow({ data, onClickPreviewClose, onClickHistory, onClickCollect }: Props) {
   const {
     tokenId,
     isOpen,
@@ -87,9 +89,10 @@ export function StrategyPositionRow({ data, onClickPreviewClose }: Props) {
     onClickPreviewClose(data.tokenId);
   };
 
+  const isHfInfinite = !isFinite(healthFactor) || healthFactor > 1e50;
   let hfColor = "text-emerald-300";
-  if (healthFactor < 1.1) hfColor = "text-rose-300";
-  else if (healthFactor < 1.3) hfColor = "text-amber-300";
+  if (!isHfInfinite && healthFactor < 1.1) hfColor = "text-rose-300";
+  else if (!isHfInfinite && healthFactor < 1.3) hfColor = "text-amber-300";
 
   return (
     <div className="grid gap-6 md:grid-cols-3">
@@ -234,7 +237,7 @@ export function StrategyPositionRow({ data, onClickPreviewClose }: Props) {
               Health factor
             </div>
             <div className={`text-xl font-semibold ${hfColor}`}>
-              {healthFactor.toFixed(2)}
+              {isHfInfinite ? "∞" : healthFactor.toFixed(2)}
             </div>
           </div>
 
@@ -277,7 +280,19 @@ export function StrategyPositionRow({ data, onClickPreviewClose }: Props) {
           </div>
         </div>
 
-        <div className="flex justify-end">
+        <div className="flex justify-end gap-2">
+          <button
+            className="rounded-full border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
+            onClick={() => onClickHistory?.(data.tokenId)}
+          >
+            History
+          </button>
+          <button
+            className="rounded-full bg-emerald-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500"
+            onClick={() => onClickCollect?.(data.tokenId)}
+          >
+            Collect fees
+          </button>
           <button
             className="rounded-full border border-indigo-400/40 bg-indigo-500/10 px-4 py-1.5 text-xs font-medium text-indigo-100 hover:bg-indigo-500/20"
             onClick={handleClickPreview}

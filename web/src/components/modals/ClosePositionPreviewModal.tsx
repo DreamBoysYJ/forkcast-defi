@@ -4,12 +4,11 @@
 import { useEffect, useState } from "react";
 import { useAccount, useConfig, useWriteContract } from "wagmi";
 import { readContract, waitForTransactionReceipt } from "@wagmi/core";
-import { parseUnits, decodeEventLog } from "viem";
+import { parseUnits } from "viem";
 import { strategyRouterContract } from "@/lib/contracts";
-import { useRouter } from "next/navigation";
-
-import { useHookEventStore, UiHookEvent } from "@/store/useHookEventStore";
-import { hookAbi } from "@/abi/hookAbi";
+import { postTxHint } from "@/lib/backendApi";
+import { refreshActiveQueries } from "@/lib/refreshActiveQueries";
+import { useQueryClient } from "@tanstack/react-query";
 
 // FOR DEMO (V1) : Only Use AAVE/LINK
 const TOKEN_META: Record<
@@ -109,20 +108,17 @@ function toTokenAmount(raw: bigint, decimals: number): number {
   return Number(raw) / 10 ** decimals;
 }
 
-// ✅ 훅 주소 (클라에서 보는 용도)
-const HOOK_ADDRESS = process.env.NEXT_PUBLIC_HOOK as `0x${string}` | undefined;
+
 
 export function ClosePositionPreviewModal(
   props: ClosePositionPreviewModalProps
 ) {
   const { isOpen, onClose, tokenId, totalDebtUsdFromCard } = props;
-  const router = useRouter();
+  const queryClient = useQueryClient();
 
   const { address: wallet } = useAccount();
   const wagmiConfig = useConfig();
   const { writeContractAsync } = useWriteContract();
-
-  const addManyHookEvents = useHookEventStore((s) => s.addMany);
 
   const [preview, setPreview] = useState<ClosePreviewData | null>(null);
   const [walletBorrowBalance, setWalletBorrowBalance] = useState<number>(0);
@@ -134,6 +130,7 @@ export function ClosePositionPreviewModal(
   const [phase, setPhase] = useState<Phase>("approve");
   const [mode, setMode] = useState<Mode>("simulate");
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [txError, setTxError] = useState<string | null>(null);
 
   // 모달 열릴 때마다 실제 previewClosePosition + balance/allowance 읽어오기
   useEffect(() => {
@@ -327,7 +324,7 @@ export function ClosePositionPreviewModal(
     !hasPreview ||
     isLoadingPreview ||
     isRunningTx ||
-    insufficientBalance ||
+    (phase === "close" && insufficientBalance) ||
     extraAmount < 0;
 
   if (mode === "done") {
@@ -351,23 +348,14 @@ export function ClosePositionPreviewModal(
       return;
     }
 
+    setTxError(null);
+
     if (phase === "approve" && extraAmount > 0) {
-      // 1) Approve 단계: maxExtraFromUser 만큼 approve
       setIsRunningTx(true);
       try {
-        const approveTokenAmount = preview.maxExtraFromUser;
         const approveWei = parseUnits(
-          approveTokenAmount.toString(),
+          preview.maxExtraFromUser.toString(),
           preview.borrowDecimals
-        );
-
-        console.log(
-          "[ClosePreview] approve",
-          preview.borrowSymbol,
-          "spender=router:",
-          strategyRouterContract.address,
-          "amount:",
-          approveTokenAmount
         );
 
         const hash = await writeContractAsync({
@@ -377,16 +365,20 @@ export function ClosePositionPreviewModal(
           args: [strategyRouterContract.address, approveWei],
         });
 
-        console.log("[ClosePreview] approve tx hash:", hash);
+        const approveReceipt = await waitForTransactionReceipt(wagmiConfig, { hash });
+        if (approveReceipt.status === "reverted") {
+          throw new Error("Approve transaction reverted on-chain");
+        }
+
         setHasAllowance(true);
         setPhase("close");
       } catch (e) {
         console.error("[ClosePreview] approve failed", e);
+        setTxError((e as any)?.shortMessage ?? (e as any)?.message ?? "Approve failed");
       } finally {
         setIsRunningTx(false);
       }
     } else {
-      // 2) closePosition 호출
       setIsRunningTx(true);
       try {
         const hash = await writeContractAsync({
@@ -396,75 +388,23 @@ export function ClosePositionPreviewModal(
           gas: 5_000_000n,
         });
 
-        console.log("[ClosePreview] closePosition tx hash:", hash);
-
-        // 🔥 여기서 tx 확정까지 기다리고, 훅 이벤트 파싱
-        const receipt = await waitForTransactionReceipt(wagmiConfig, {
-          hash,
-        });
-
-        console.log(
-          "[ClosePreview] all log addresses",
-          receipt.logs.map((l) => l.address)
-        );
-        console.log("[ClosePreview] HOOK_ADDRESS", HOOK_ADDRESS);
-
-        const logsForHook = receipt.logs.filter(
-          (log) =>
-            HOOK_ADDRESS &&
-            log.address.toLowerCase() === HOOK_ADDRESS.toLowerCase()
-        );
-
-        console.log("[ClosePreview] logsForHook.length", logsForHook.length);
-
-        const newEvents: UiHookEvent[] = [];
-
-        logsForHook.forEach((log, index) => {
-          try {
-            const decoded = decodeEventLog({
-              abi: hookAbi,
-              data: log.data,
-              topics: log.topics,
-            });
-
-            if (decoded.eventName !== "SwapPriceLogged") return;
-
-            const { poolId, tick, sqrtPriceX96, timestamp } =
-              decoded.args as any;
-            const tsSec = Number(timestamp);
-            const tsMs = Number.isFinite(tsSec) ? tsSec * 1000 : Date.now();
-
-            const evt: UiHookEvent = {
-              id: `${hash}-${index}`,
-              source: "USER_TX",
-              txHash: hash,
-              poolId: poolId as `0x${string}`,
-              tick: Number(tick),
-              sqrtPriceX96: BigInt(sqrtPriceX96).toString(),
-              timestampMs: tsMs,
-            };
-
-            console.log("[ClosePreview] hook event:", evt);
-            newEvents.push(evt);
-          } catch (e) {
-            console.error(
-              "[ClosePreview] decodeEventLog failed for tx",
-              hash,
-              e
-            );
-          }
-        });
-
-        if (newEvents.length > 0) {
-          addManyHookEvents(newEvents);
+        if (wallet) {
+          postTxHint({ txHash: hash, actionType: "CLOSE_POSITION", userAddress: wallet })
+            .catch((err) => console.error("[tx-hint] CLOSE_POSITION failed", err));
         }
 
+        const receipt = await waitForTransactionReceipt(wagmiConfig, { hash });
+        if (receipt.status === "reverted") {
+          throw new Error("closePosition reverted on-chain");
+        }
+
+        await refreshActiveQueries(queryClient);
         alert("CLOSE POSITION COMPLETED!");
         onClose();
-        router.refresh(); // 필요 없으면 나중에 빼도 됨
         setMode("done");
       } catch (e) {
         console.error("[ClosePreview] closePosition failed", e);
+        setTxError((e as any)?.shortMessage ?? (e as any)?.message ?? "Transaction failed");
       } finally {
         setIsRunningTx(false);
       }
@@ -721,6 +661,11 @@ export function ClosePositionPreviewModal(
                   amounts may slightly differ.
                 </div>
               </div>
+            )}
+
+            {/* tx 에러 */}
+            {txError && (
+              <p className="mt-4 text-xs text-rose-400">{txError}</p>
             )}
 
             {/* 안내 문구 */}

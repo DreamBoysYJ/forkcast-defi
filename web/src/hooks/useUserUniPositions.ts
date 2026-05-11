@@ -4,7 +4,7 @@
 import { useAccount, useReadContracts } from "wagmi";
 import { strategyRouterContract, strategyLensContract } from "@/lib/contracts";
 
-const MAX_POSITIONS = 5 as const;
+const MAX_POSITIONS = 20 as const;
 
 // Lens.getUserUniPosition 이 돌려주는 struct 모양
 export type RawUniPositionOverview = {
@@ -108,6 +108,20 @@ export function useUserUniPositions() {
 
   const posResultsAny = (posResults ?? []) as any[];
 
+  // allowFailure:true per-item 실패 노출
+  const posItemErrors: Error[] = posResultsAny
+    .filter((r) => r?.status === "failure")
+    .map((r) => r?.error);
+
+  if (posItemErrors.length > 0) {
+    console.error("[useUserUniPositions] getUserUniPosition per-item failures:", posItemErrors);
+  }
+
+  const allPosFailed =
+    tokenIds.length > 0 &&
+    posResultsAny.length > 0 &&
+    posResultsAny.every((r) => r?.status === "failure");
+
   const positions: RawUniPositionOverview[] =
     posResultsAny
       .map((r) => {
@@ -120,9 +134,7 @@ export function useUserUniPositions() {
       ) ?? [];
 
   const isLoading = isIdsLoading || isPosLoading;
-  const isError = Boolean(idsError || posError);
-
-  // ⭐ 이 훅에서 "레이트 리밋이 걸린 상태인지"도 같이 리턴
+  const isError = Boolean(idsError || posError || allPosFailed);
   const isRateLimited =
     isRateLimitError(idsError) || isRateLimitError(posError);
 
@@ -131,6 +143,6 @@ export function useUserUniPositions() {
     positions,
     isLoading,
     isError,
-    isRateLimited, // <- 카드에서 메시지 띄우는 용도
+    isRateLimited,
   };
 }

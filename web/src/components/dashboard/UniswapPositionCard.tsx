@@ -2,7 +2,7 @@
 "use client";
 
 import { useState } from "react";
-import { useConfig } from "wagmi";
+import { useAccount, useConfig } from "wagmi";
 import {
   simulateContract,
   writeContract,
@@ -16,6 +16,7 @@ import {
 import { CollectFeesModal } from "../modals/CollectFeesModal";
 import { useUserUniPositions } from "@/hooks/useUserUniPositions";
 import { strategyRouterContract } from "@/lib/contracts";
+import { postTxHint } from "@/lib/backendApi";
 
 // Token Metadata for LP table
 const TOKEN_META: Record<
@@ -86,6 +87,7 @@ export function UniswapPositionCard() {
   const { tokenIds, positions, isLoading, isError, isRateLimited } =
     useUserUniPositions();
   const wagmiConfig = useConfig();
+  const { address } = useAccount();
 
   const [selectedPosition, setSelectedPosition] =
     useState<UniPositionRowData | null>(null);
@@ -98,9 +100,12 @@ export function UniswapPositionCard() {
       ?.map((pos, idx) => {
         const idBig = tokenIds?.[idx] ?? BigInt(idx);
 
-        // amount0Now, amount1Now both 0 -> hide position from table
+        // amount0Now, amount1Now both 0 -> skip (no liquidity in this position)
         const isEmptyPosition = pos.amount0Now === 0n && pos.amount1Now === 0n;
-        if (isEmptyPosition) return null;
+        if (isEmptyPosition) {
+          console.warn("[UniswapPositionCard] tokenId", Number(idBig), "has 0 amounts — hidden. liquidity:", pos.liquidity?.toString());
+          return null;
+        }
 
         const meta0 = getTokenMeta(pos.token0);
         const meta1 = getTokenMeta(pos.token1);
@@ -206,7 +211,20 @@ export function UniswapPositionCard() {
 
       console.log("[collectFees][execute] tx hash", hash);
 
-      await waitForTransactionReceipt(wagmiConfig, { hash });
+      if (address) {
+        postTxHint({
+          txHash: hash,
+          actionType: "COLLECT_FEES",
+          userAddress: address,
+        }).catch((err) =>
+          console.error("[tx-hint] COLLECT_FEES failed", err)
+        );
+      }
+
+      const receipt = await waitForTransactionReceipt(wagmiConfig, { hash });
+      if (receipt.status === "reverted") {
+        throw new Error("collectFees reverted on-chain");
+      }
 
       // TODO : trigger refetch uni position lists if needed
     } finally {

@@ -55,7 +55,7 @@ export function useStrategyPositionView() {
   } = useReadContracts({
     contracts: !address
       ? []
-      : Array.from({ length: 5 }, (_, i) => ({
+      : Array.from({ length: 20 }, (_, i) => ({
           ...strategyRouterContract,
           functionName: "userPositionIds",
           args: [address as `0x${string}`, BigInt(i)],
@@ -106,70 +106,69 @@ export function useStrategyPositionView() {
     },
   });
 
-  let view: StrategyPositionView | null = null;
+  const mapToView = (raw: any, tokenId: bigint): StrategyPositionView => ({
+    tokenId,
+    owner: raw.core.owner,
+    vault: raw.core.vault,
+    supplyAsset: raw.core.supplyAsset,
+    borrowAsset: raw.core.borrowAsset,
+    isOpen: raw.core.isOpen,
+
+    uniToken0: raw.uniToken0,
+    uniToken1: raw.uniToken1,
+    liquidity: raw.liquidity,
+    amount0Now: Number(raw.amount0Now) / 1e18,
+    amount1Now: Number(raw.amount1Now) / 1e18,
+    tickLower: Number(raw.tickLower),
+    tickUpper: Number(raw.tickUpper),
+    currentTick: Number(raw.currentTick),
+
+    totalCollateralUsd: Number(raw.totalCollateralBase) / 1e8,
+    totalDebtUsd: Number(raw.totalDebtBase) / 1e8,
+    availableBorrowUsd: Number(raw.availableBorrowBase) / 1e8,
+    ltv: Number(raw.ltv) / 1e4,
+    liqThreshold: Number(raw.currentLiquidationThreshold) / 1e4,
+    healthFactor: raw.healthFactor >= 2n ** 128n ? Infinity : Number(raw.healthFactor) / 1e18,
+  });
+
+  // allowFailure:true 는 top-level error를 세우지 않으므로 per-item 실패를 직접 추출
+  const viewItemErrors: Error[] =
+    (viewResults ?? [])
+      .filter((r: any) => r?.status === "failure")
+      .map((r: any) => r?.error);
+
+  if (viewItemErrors.length > 0) {
+    console.error("[useStrategyPositionView] getStrategyPositionView per-item failures:", viewItemErrors);
+  }
+
+  const allViewsFailed =
+    hasAnyToken &&
+    viewResults !== undefined &&
+    viewResults.length > 0 &&
+    viewResults.every((r: any) => r?.status === "failure");
+
+  let views: StrategyPositionView[] = [];
 
   if (viewResults && tokenIds.length > 0) {
-    const mapToView = (raw: any, tokenId: bigint): StrategyPositionView => ({
-      tokenId,
-      owner: raw.core.owner,
-      vault: raw.core.vault,
-      supplyAsset: raw.core.supplyAsset,
-      borrowAsset: raw.core.borrowAsset,
-      isOpen: raw.core.isOpen,
-
-      uniToken0: raw.uniToken0,
-      uniToken1: raw.uniToken1,
-      liquidity: raw.liquidity,
-      amount0Now: Number(raw.amount0Now) / 1e18,
-      amount1Now: Number(raw.amount1Now) / 1e18,
-      tickLower: Number(raw.tickLower),
-      tickUpper: Number(raw.tickUpper),
-      currentTick: Number(raw.currentTick),
-
-      totalCollateralUsd: Number(raw.totalCollateralBase) / 1e8,
-      totalDebtUsd: Number(raw.totalDebtBase) / 1e8,
-      availableBorrowUsd: Number(raw.availableBorrowBase) / 1e8,
-      ltv: Number(raw.ltv) / 1e4,
-      liqThreshold: Number(raw.currentLiquidationThreshold) / 1e4,
-      healthFactor: Number(raw.healthFactor) / 1e18,
-    });
-
-    // 최신 open 포지션 우선
-    for (let i = viewResults.length - 1; i >= 0; i--) {
+    for (let i = 0; i < viewResults.length; i++) {
       const r: any = viewResults[i];
       if (!r) continue;
       const raw = r.result ?? r;
       if (!raw || !raw.core) continue;
-      if (raw.core.isOpen) {
-        const tokenId = tokenIds[i];
-        view = mapToView(raw, tokenId);
-        break;
-      }
-    }
-
-    // fallback: closed 라도 하나 보여주고 싶으면
-    if (!view) {
-      for (let i = viewResults.length - 1; i >= 0; i--) {
-        const r: any = viewResults[i];
-        if (!r) continue;
-        const raw = r.result ?? r;
-        if (!raw || !raw.core) continue;
-        const tokenId = tokenIds[i];
-        view = mapToView(raw, tokenId);
-        break;
-      }
+      if (!raw.core.isOpen) continue;
+      views.push(mapToView(raw, tokenIds[i]));
     }
   }
 
   const isLoading = isIdsLoading || isViewsLoading;
-  const isError = Boolean(idsError || viewsError);
+  const isError = Boolean(idsError || viewsError || allViewsFailed);
   const isRateLimited =
-    isRateLimitError(idsError) || isRateLimitError(viewsError); // ⭐ 추가
+    isRateLimitError(idsError) || isRateLimitError(viewsError);
 
   return {
-    view,
+    views,
     isLoading,
     isError,
-    isRateLimited, // <- 카드에서 "RPC rate limit" 안내 띄울 수 있음
+    isRateLimited,
   };
 }

@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Forkcast — Backend Data Model (4 layers)</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #ffffff; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Inter", "Helvetica Neue",
+                 "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+    color: #1f1f1f;
+  }
+  .frame {
+    background: #ececec;
+    padding: 56px 56px 64px;
+    display: inline-block;
+  }
+  .title {
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+    color: #2a2a2a;
+    margin: 0 0 4px 4px;
+  }
+  .subtitle {
+    font-size: 12px;
+    color: #555;
+    margin: 0 0 22px 4px;
+  }
+  svg { display: block; }
+  text { font-family: inherit; }
+</style>
+</head>
+<body>
+<div class="frame">
+  <p class="title">Forkcast Backend — Data Model (4 layers)</p>
+  <p class="subtitle">raw chain events, projected read models, periodic state snapshots, and operational metadata are stored separately on purpose.</p>
+  <svg viewBox="0 0 1280 800" width="1280" height="800" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5"
+              markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#3a3a3a"/>
+      </marker>
+    </defs>
+
+    <!-- ================= Top: triggers ================= -->
+
+    <!-- Cloud Scheduler -->
+    <g>
+      <rect x="60" y="40" width="240" height="84" rx="10" ry="10"
+            fill="#d6d6d6" stroke="#5a5a5a" stroke-width="1.4"/>
+      <text x="180" y="72" text-anchor="middle" font-size="14" font-weight="600">Cloud Scheduler</text>
+      <text x="180" y="92" text-anchor="middle" font-size="11" fill="#333">OIDC bearer  ·  every 5 min</text>
+      <text x="180" y="110" text-anchor="middle" font-size="11" fill="#333">→ /internal/jobs/*</text>
+    </g>
+
+    <!-- Frontend -->
+    <g>
+      <rect x="980" y="40" width="240" height="84" rx="10" ry="10"
+            fill="#d6d6d6" stroke="#5a5a5a" stroke-width="1.4"/>
+      <text x="1100" y="72" text-anchor="middle" font-size="14" font-weight="600">Web (Next.js)</text>
+      <text x="1100" y="92" text-anchor="middle" font-size="11" fill="#333">GET /api/*  (read models / snapshots)</text>
+      <text x="1100" y="110" text-anchor="middle" font-size="11" fill="#333">POST /api/tx-hints  (best-effort)</text>
+    </g>
+
+    <!-- Two jobs in the middle -->
+    <g>
+      <rect x="380" y="44" width="220" height="76" rx="8" ry="8"
+            fill="#cdd9ed" stroke="#3f3f3f" stroke-width="1.3"/>
+      <text x="490" y="72" text-anchor="middle" font-size="13" font-weight="600">event-sync job</text>
+      <text x="490" y="92" text-anchor="middle" font-size="11" fill="#333">eth_getLogs</text>
+      <text x="490" y="108" text-anchor="middle" font-size="11" fill="#333">raw → projection</text>
+    </g>
+    <g>
+      <rect x="680" y="44" width="220" height="76" rx="8" ry="8"
+            fill="#cdd9ed" stroke="#3f3f3f" stroke-width="1.3"/>
+      <text x="790" y="72" text-anchor="middle" font-size="13" font-weight="600">snapshot job</text>
+      <text x="790" y="92" text-anchor="middle" font-size="11" fill="#333">eth_call · StrategyLens</text>
+      <text x="790" y="108" text-anchor="middle" font-size="11" fill="#333">collect-then-saveAll</text>
+    </g>
+
+    <!-- arrows from triggers to jobs -->
+    <path d="M 220 124 C 220 160, 320 160, 420 124"
+          stroke="#3a3a3a" stroke-width="1.5" fill="none"
+          stroke-dasharray="6 4" marker-end="url(#arrow)"/>
+    <path d="M 260 124 C 320 200, 660 200, 760 124"
+          stroke="#3a3a3a" stroke-width="1.5" fill="none"
+          stroke-dasharray="6 4" marker-end="url(#arrow)"/>
+
+    <!-- ================= Layer boxes ================= -->
+
+    <!-- Layer 1: Operational -->
+    <g>
+      <rect x="60" y="200" width="280" height="220" rx="12" ry="12"
+            fill="#f4eddc" stroke="#3f3f3f" stroke-width="1.5"/>
+      <text x="80" y="230" font-size="12" font-weight="700" fill="#7a5a10">1 · OPERATIONAL</text>
+      <text x="80" y="252" font-size="14" font-weight="700" fill="#1f1f1f">Job runtime metadata</text>
+      <line x1="80" y1="262" x2="320" y2="262" stroke="#9a8a4a" stroke-width="0.8"/>
+      <text x="80" y="284" font-size="12" font-weight="600">sync_cursor</text>
+      <text x="80" y="300" font-size="11" fill="#333">(cursor_name) · last_synced_block</text>
+      <text x="80" y="324" font-size="12" font-weight="600">job_lock</text>
+      <text x="80" y="340" font-size="11" fill="#333">lease + atomic upsert + owner UUID</text>
+      <text x="80" y="364" font-size="12" font-weight="600">job_run</text>
+      <text x="80" y="380" font-size="11" fill="#333">REQUIRES_NEW · survives biz rollback</text>
+      <text x="80" y="406" font-size="11" fill="#555" font-style="italic">why separate · operational truth</text>
+    </g>
+
+    <!-- Layer 2: Raw ingest -->
+    <g>
+      <rect x="380" y="200" width="280" height="220" rx="12" ry="12"
+            fill="#dcd0ee" stroke="#3f3f3f" stroke-width="1.5"/>
+      <text x="400" y="230" font-size="12" font-weight="700" fill="#5a3a8a">2 · RAW INGEST</text>
+      <text x="400" y="252" font-size="14" font-weight="700" fill="#1f1f1f">Source-of-truth events</text>
+      <line x1="400" y1="262" x2="640" y2="262" stroke="#7a5aa8" stroke-width="0.8"/>
+      <text x="400" y="284" font-size="12" font-weight="600">raw_chain_event</text>
+      <text x="400" y="302" font-size="11" fill="#333">PositionOpened · PositionClosed</text>
+      <text x="400" y="318" font-size="11" fill="#333">FeesCollected · SwapPriceLogged</text>
+      <text x="400" y="342" font-size="11" fill="#333">payload_json (jsonb)</text>
+      <text x="400" y="362" font-size="11" fill="#333">unique <tspan font-family="ui-monospace, Menlo, monospace">(tx_hash, log_index)</tspan></text>
+      <text x="400" y="406" font-size="11" fill="#555" font-style="italic">why separate · replay &amp; debug</text>
+    </g>
+
+    <!-- Layer 3: Read models -->
+    <g>
+      <rect x="700" y="200" width="520" height="220" rx="12" ry="12"
+            fill="#f4d2c6" stroke="#3f3f3f" stroke-width="1.5"/>
+      <text x="720" y="230" font-size="12" font-weight="700" fill="#a04020">3 · READ MODELS</text>
+      <text x="720" y="252" font-size="14" font-weight="700" fill="#1f1f1f">Query-shaped projections</text>
+      <line x1="720" y1="262" x2="1200" y2="262" stroke="#a96346" stroke-width="0.8"/>
+
+      <!-- two columns -->
+      <g>
+        <text x="720" y="284" font-size="12" font-weight="600">strategy_position</text>
+        <text x="720" y="300" font-size="11" fill="#333">current open positions (PK token_id)</text>
+        <text x="720" y="324" font-size="12" font-weight="600">position_timeline</text>
+        <text x="720" y="340" font-size="11" fill="#333">OPENED · FEES_COLLECTED · CLOSED</text>
+      </g>
+      <g>
+        <text x="970" y="284" font-size="12" font-weight="600">pool_price_event</text>
+        <text x="970" y="300" font-size="11" fill="#333">tick · sqrtPriceX96 · pool_id</text>
+        <text x="970" y="324" font-size="12" font-weight="600">user_vault</text>
+        <text x="970" y="340" font-size="11" fill="#333">user ↔ vault mapping</text>
+      </g>
+
+      <text x="720" y="370" font-size="11" fill="#333">idempotent projection · safe to rebuild from raw</text>
+      <text x="720" y="406" font-size="11" fill="#555" font-style="italic">why separate · UI shape ≠ on-chain log shape</text>
+    </g>
+
+    <!-- Layer 4: Snapshot -->
+    <g>
+      <rect x="60" y="468" width="600" height="200" rx="12" ry="12"
+            fill="#cde6d6" stroke="#3f3f3f" stroke-width="1.5"/>
+      <text x="80" y="498" font-size="12" font-weight="700" fill="#2a6a40">4 · SNAPSHOT</text>
+      <text x="80" y="520" font-size="14" font-weight="700" fill="#1f1f1f">Point-in-time state photos</text>
+      <line x1="80" y1="530" x2="640" y2="530" stroke="#3f8060" stroke-width="0.8"/>
+      <text x="80" y="552" font-size="12" font-weight="600">position_snapshot</text>
+      <text x="80" y="570" font-size="11" fill="#333">liquidity · amount0Now · amount1Now</text>
+      <text x="80" y="586" font-size="11" fill="#333">currentTick · sqrtPriceX96</text>
+      <text x="80" y="602" font-size="11" fill="#333">totalCollateralBase · totalDebtBase · healthFactor</text>
+      <text x="80" y="618" font-size="11" fill="#333">snapshot_at · observed_block_number</text>
+      <text x="80" y="640" font-size="11" fill="#333">unique <tspan font-family="ui-monospace, Menlo, monospace">(token_id, snapshot_at)</tspan></text>
+      <text x="380" y="552" font-size="11" fill="#555" font-style="italic">why separate ·</text>
+      <text x="380" y="568" font-size="11" fill="#555" font-style="italic">events explain <tspan font-weight="700">what happened</tspan>;</text>
+      <text x="380" y="584" font-size="11" fill="#555" font-style="italic">snapshots explain <tspan font-weight="700">what it looked like</tspan>;</text>
+      <text x="380" y="600" font-size="11" fill="#555" font-style="italic">at a moment in time.</text>
+    </g>
+
+    <!-- Frontend hint -->
+    <g>
+      <rect x="700" y="468" width="520" height="200" rx="12" ry="12"
+            fill="#e8e0d0" stroke="#3f3f3f" stroke-width="1.5"/>
+      <text x="720" y="498" font-size="12" font-weight="700" fill="#705030">FRONTEND HINT</text>
+      <text x="720" y="520" font-size="14" font-weight="700" fill="#1f1f1f">Best-effort tx hint</text>
+      <line x1="720" y1="530" x2="1200" y2="530" stroke="#8a6a4a" stroke-width="0.8"/>
+      <text x="720" y="552" font-size="12" font-weight="600">pending_tx</text>
+      <text x="720" y="570" font-size="11" fill="#333">tx_hash · action_type · user_address · status</text>
+      <text x="720" y="594" font-size="11" fill="#333">PENDING / MINED_UNCONFIRMED / CONFIRMED / FAILED / EXPIRED</text>
+      <text x="720" y="624" font-size="11" fill="#555" font-style="italic">why separate ·</text>
+      <text x="720" y="640" font-size="11" fill="#555" font-style="italic">a frontend hint is <tspan font-weight="700">not</tspan> the truth — final state is reconciled from on-chain events.</text>
+    </g>
+
+    <!-- ================= Arrows between layers ================= -->
+
+    <!-- event-sync → operational (sync_cursor / job_lock / job_run) -->
+    <path d="M 470 124 C 410 160, 230 170, 200 200"
+          stroke="#3a3a3a" stroke-width="1.4" fill="none"
+          stroke-dasharray="6 4" marker-end="url(#arrow)"/>
+    <text x="240" y="172" font-size="11" fill="#333">acquire lock · advance cursor · log run</text>
+
+    <!-- event-sync → raw_chain_event -->
+    <path d="M 500 122 C 500 160, 510 174, 510 200"
+          stroke="#3a3a3a" stroke-width="1.4" fill="none"
+          stroke-dasharray="6 4" marker-end="url(#arrow)"/>
+    <text x="514" y="170" font-size="11" fill="#333">insert (idempotent)</text>
+
+    <!-- raw → read models (projection) -->
+    <path d="M 660 304 C 690 304, 690 304, 700 304"
+          stroke="#3a3a3a" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+    <text x="666" y="296" font-size="11" fill="#333" text-anchor="start">project</text>
+
+    <!-- snapshot job → snapshot table -->
+    <path d="M 790 122 C 790 240, 540 320, 360 468"
+          stroke="#3a3a3a" stroke-width="1.4" fill="none"
+          stroke-dasharray="6 4" marker-end="url(#arrow)"/>
+    <text x="540" y="304" font-size="11" fill="#333">per-position eth_call → row</text>
+
+    <!-- snapshot job → operational (lock + run) -->
+    <path d="M 720 124 C 580 160, 320 170, 230 200"
+          stroke="#3a3a3a" stroke-width="1.2" fill="none"
+          stroke-dasharray="3 4" marker-end="url(#arrow)"/>
+
+    <!-- Frontend (POST tx-hint) → pending_tx -->
+    <path d="M 1100 124 C 1100 300, 1000 380, 960 468"
+          stroke="#3a3a3a" stroke-width="1.4" fill="none"
+          stroke-dasharray="6 4" marker-end="url(#arrow)"/>
+    <text x="1004" y="298" font-size="11" fill="#333">POST /api/tx-hints</text>
+
+    <!-- Frontend (GET) ← read models / snapshot -->
+    <path d="M 1100 200 C 1100 180, 1100 160, 1100 124"
+          stroke="#3a3a3a" stroke-width="1.4" fill="none" marker-end="url(#arrow)"/>
+    <text x="1116" y="174" font-size="11" fill="#333" text-anchor="start">GET</text>
+    <path d="M 1180 420 C 1180 360, 1180 200, 1180 124"
+          stroke="#3a3a3a" stroke-width="1.4" fill="none" marker-end="url(#arrow)"/>
+    <path d="M 660 540 C 900 540, 1100 480, 1170 124"
+          stroke="#3a3a3a" stroke-width="1.2" fill="none"
+          stroke-dasharray="3 4" marker-end="url(#arrow)"/>
+
+    <!-- Footer note -->
+    <text x="60" y="720" font-size="11" fill="#555">
+      Forward-only sync to <tspan font-family="ui-monospace, Menlo, monospace">latest − 5</tspan> avoids recent-block instability;
+      raw + read model split keeps projections rebuildable from a single replayable source.
+    </text>
+    <text x="60" y="738" font-size="11" fill="#555">
+      Operational tables live on their own transaction boundary so operational history (lock, cursor, job run) is never lost when business work fails.
+    </text>
+  </svg>
+</div>
+</body>
+</html>

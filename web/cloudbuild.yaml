@@ -1,0 +1,16 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - build
+      - '--build-arg'
+      - 'NEXT_PUBLIC_BACKEND_URL=$_NEXT_PUBLIC_BACKEND_URL'
+      - '--build-arg'
+      - 'NEXT_PUBLIC_POOL_ID=$_NEXT_PUBLIC_POOL_ID'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/forcast-web:latest'
+      - '.'
+images:
+  - 'gcr.io/$PROJECT_ID/forcast-web:latest'
+substitutions:
+  _NEXT_PUBLIC_BACKEND_URL: 'http://localhost:8080'
+  _NEXT_PUBLIC_POOL_ID: ''
