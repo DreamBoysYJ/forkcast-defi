@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Forkcast — System End-to-end</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #ffffff; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Inter", "Helvetica Neue",
+                 "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+    color: #1f1f1f;
+  }
+  .frame {
+    background: #ececec;
+    padding: 56px 56px 64px;
+    display: inline-block;
+  }
+  .title {
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+    color: #2a2a2a;
+    margin: 0 0 24px 4px;
+  }
+  svg { display: block; }
+  text { font-family: inherit; }
+</style>
+</head>
+<body>
+<div class="frame">
+  <p class="title">Forkcast — System End-to-end</p>
+  <svg viewBox="0 0 1280 720" width="1280" height="720" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5"
+              markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#3a3a3a"/>
+      </marker>
+      <marker id="arrow-light" viewBox="0 0 10 10" refX="9" refY="5"
+              markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#5a5a5a"/>
+      </marker>
+      <filter id="soft" x="-10%" y="-10%" width="120%" height="120%">
+        <feGaussianBlur stdDeviation="0.4" />
+      </filter>
+    </defs>
+
+    <!-- ================= Top row ================= -->
+
+    <!-- User wallet (yellow circle) -->
+    <g>
+      <circle cx="140" cy="118" r="58" fill="#ffe7a3" stroke="#5a5a5a" stroke-width="1.4"/>
+      <text x="140" y="114" text-anchor="middle" font-size="14" font-weight="600" fill="#1f1f1f">User</text>
+      <text x="140" y="132" text-anchor="middle" font-size="11" fill="#3a3a3a">(MetaMask wallet)</text>
+    </g>
+
+    <!-- Sepolia chain box -->
+    <g>
+      <rect x="430" y="58" width="320" height="124" rx="10" ry="10"
+            fill="#dcd0ee" stroke="#5a5a5a" stroke-width="1.4"/>
+      <text x="590" y="92" text-anchor="middle" font-size="15" font-weight="600">Sepolia Chain</text>
+      <line x1="470" y1="104" x2="710" y2="104" stroke="#7a7a7a" stroke-width="0.8" />
+      <text x="590" y="124" text-anchor="middle" font-size="11.5" fill="#333">Aave V3 · Uniswap v4</text>
+      <text x="590" y="142" text-anchor="middle" font-size="11.5" fill="#333">StrategyRouter · SwapPriceLoggerHook</text>
+      <text x="590" y="160" text-anchor="middle" font-size="11.5" fill="#333">StrategyLens (view)</text>
+    </g>
+
+    <!-- Cloud Scheduler -->
+    <g>
+      <rect x="940" y="68" width="260" height="100" rx="10" ry="10"
+            fill="#d6d6d6" stroke="#5a5a5a" stroke-width="1.4"/>
+      <text x="1070" y="100" text-anchor="middle" font-size="15" font-weight="600">Cloud Scheduler</text>
+      <text x="1070" y="124" text-anchor="middle" font-size="11.5" fill="#333">every 5 min · OIDC bearer</text>
+      <text x="1070" y="144" text-anchor="middle" font-size="11.5" fill="#333">forkcast-scheduler service account</text>
+    </g>
+
+    <!-- ================= Middle: Web + Backend ================= -->
+
+    <!-- Web (Next.js) -->
+    <g>
+      <rect x="40" y="248" width="240" height="116" rx="10" ry="10"
+            fill="#d6d6d6" stroke="#5a5a5a" stroke-width="1.4"/>
+      <text x="160" y="280" text-anchor="middle" font-size="15" font-weight="600">Web (Next.js)</text>
+      <line x1="74" y1="292" x2="246" y2="292" stroke="#7a7a7a" stroke-width="0.8" />
+      <text x="160" y="312" text-anchor="middle" font-size="11.5" fill="#333">App Router · TypeScript</text>
+      <text x="160" y="330" text-anchor="middle" font-size="11.5" fill="#333">wagmi + viem · Zustand</text>
+      <text x="160" y="348" text-anchor="middle" font-size="11.5" fill="#333">Cloud Run (forcast-web)</text>
+    </g>
+
+    <!-- Backend container -->
+    <g>
+      <rect x="360" y="220" width="840" height="260" rx="14" ry="14"
+            fill="#e6e6e6" stroke="#3f3f3f" stroke-width="1.6"/>
+      <text x="384" y="248" font-size="15" font-weight="700" fill="#1f1f1f">
+        Spring Boot Backend &nbsp;·&nbsp; Cloud Run (scale-to-zero)
+      </text>
+      <text x="384" y="266" font-size="11" fill="#444">Java 21 · Spring Web · JPA · Flyway · web3j</text>
+
+      <!-- event-sync job -->
+      <g>
+        <rect x="396" y="290" width="226" height="92" rx="8" ry="8"
+              fill="#cdd9ed" stroke="#3f3f3f" stroke-width="1.3"/>
+        <text x="509" y="316" text-anchor="middle" font-size="13.5" font-weight="600">event-sync job</text>
+        <text x="509" y="338" text-anchor="middle" font-size="11" fill="#333">POST /internal/jobs/event-sync</text>
+        <text x="509" y="356" text-anchor="middle" font-size="11" fill="#333">cursor + safe head (latest − 5)</text>
+        <text x="509" y="372" text-anchor="middle" font-size="11" fill="#333">raw → projection</text>
+      </g>
+
+      <!-- snapshot job -->
+      <g>
+        <rect x="640" y="290" width="226" height="92" rx="8" ry="8"
+              fill="#cdd9ed" stroke="#3f3f3f" stroke-width="1.3"/>
+        <text x="753" y="316" text-anchor="middle" font-size="13.5" font-weight="600">snapshot job</text>
+        <text x="753" y="338" text-anchor="middle" font-size="11" fill="#333">POST /internal/jobs/snapshot</text>
+        <text x="753" y="356" text-anchor="middle" font-size="11" fill="#333">collect-then-saveAll</text>
+        <text x="753" y="372" text-anchor="middle" font-size="11" fill="#333">partial-failure tolerant</text>
+      </g>
+
+      <!-- Public API -->
+      <g>
+        <rect x="884" y="290" width="300" height="92" rx="8" ry="8"
+              fill="#f4d2c6" stroke="#3f3f3f" stroke-width="1.3"/>
+        <text x="1034" y="316" text-anchor="middle" font-size="13.5" font-weight="600">Public read API</text>
+        <text x="1034" y="338" text-anchor="middle" font-size="11" fill="#333">GET /api/positions, /api/users/…</text>
+        <text x="1034" y="356" text-anchor="middle" font-size="11" fill="#333">GET /api/pools/{id}/price-events</text>
+        <text x="1034" y="372" text-anchor="middle" font-size="11" fill="#333">POST /api/tx-hints  (best-effort)</text>
+      </g>
+
+      <!-- Bottom strip: lock / cursor / job_run + auth -->
+      <g>
+        <rect x="396" y="402" width="788" height="58" rx="8" ry="8"
+              fill="#f4eddc" stroke="#3f3f3f" stroke-width="1.3"/>
+        <text x="416" y="424" font-size="12" font-weight="600" fill="#2a2a2a">Operational safety</text>
+        <text x="416" y="442" font-size="11" fill="#333">job_lock (lease + atomic upsert + owner UUID) · job_run REQUIRES_NEW · sync_cursor forward-only</text>
+        <text x="780" y="424" font-size="12" font-weight="600" fill="#2a2a2a" text-anchor="start">Auth</text>
+        <text x="780" y="442" font-size="11" fill="#333">/internal/jobs/* verifies Google OIDC audience &amp; scheduler service-account email</text>
+      </g>
+    </g>
+
+    <!-- ================= Bottom: Postgres ================= -->
+
+    <g>
+      <rect x="500" y="540" width="320" height="120" rx="10" ry="10"
+            fill="#d6d6d6" stroke="#5a5a5a" stroke-width="1.4"/>
+      <text x="660" y="572" text-anchor="middle" font-size="15" font-weight="600">PostgreSQL — Cloud SQL</text>
+      <line x1="540" y1="584" x2="780" y2="584" stroke="#7a7a7a" stroke-width="0.8" />
+      <text x="660" y="606" text-anchor="middle" font-size="11.5" fill="#333">10 tables · Flyway-managed</text>
+      <text x="660" y="624" text-anchor="middle" font-size="11.5" fill="#333">operational · raw · read model · snapshot</text>
+      <text x="660" y="642" text-anchor="middle" font-size="11.5" fill="#333">Cloud SQL Connector (Unix socket)</text>
+    </g>
+
+    <!-- ================= Arrows ================= -->
+
+    <!-- User → Web (uses UI) -->
+    <path d="M 156 176 C 156 210, 160 220, 160 248" class="" stroke="#3a3a3a" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+    <text x="170" y="218" font-size="11" fill="#333">opens dApp</text>
+
+    <!-- User → Sepolia (signs tx) -->
+    <path d="M 196 102 C 320 70, 380 70, 430 92" stroke="#3a3a3a" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+    <text x="252" y="62" font-size="11" fill="#333">signs &amp; sends user tx</text>
+
+    <!-- Web → Backend Public API (POST tx-hint, GET reads) -->
+    <path d="M 280 306 C 740 306, 770 306, 884 320"
+          stroke="#3a3a3a" stroke-width="1.5" fill="none"
+          stroke-dasharray="6 4" marker-end="url(#arrow)"/>
+    <text x="500" y="298" font-size="11" fill="#333">POST /api/tx-hints  ·  GET /api/*</text>
+
+    <!-- Sepolia → event-sync (eth_getLogs) -->
+    <path d="M 540 184 C 540 240, 510 252, 510 290"
+          stroke="#3a3a3a" stroke-width="1.5" fill="none"
+          stroke-dasharray="6 4" marker-end="url(#arrow)"/>
+    <text x="358" y="232" font-size="11" fill="#333">eth_getLogs (Router · Hook events)</text>
+
+    <!-- snapshot job → Sepolia (eth_call to StrategyLens) -->
+    <path d="M 750 290 C 750 240, 700 200, 670 184"
+          stroke="#3a3a3a" stroke-width="1.5" fill="none"
+          stroke-dasharray="6 4" marker-end="url(#arrow)"/>
+    <text x="724" y="218" font-size="11" fill="#333">eth_call (StrategyLens)</text>
+
+    <!-- Cloud Scheduler → Backend internal endpoints -->
+    <path d="M 1066 168 C 1066 198, 1066 210, 1014 290"
+          stroke="#3a3a3a" stroke-width="1.5" fill="none"
+          stroke-dasharray="6 4" marker-end="url(#arrow)"/>
+    <text x="1038" y="222" font-size="11" fill="#333" text-anchor="end">OIDC bearer →</text>
+    <text x="1038" y="238" font-size="11" fill="#333" text-anchor="end">/internal/jobs/event-sync</text>
+    <text x="1038" y="254" font-size="11" fill="#333" text-anchor="end">/internal/jobs/snapshot</text>
+
+    <!-- Backend → Postgres (write/read) -->
+    <path d="M 660 480 C 660 510, 660 520, 660 540"
+          stroke="#3a3a3a" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+    <path d="M 690 540 C 690 520, 690 510, 690 480"
+          stroke="#3a3a3a" stroke-width="1.6" fill="none" marker-end="url(#arrow)"/>
+    <text x="708" y="514" font-size="11" fill="#333">JPA / Flyway</text>
+
+    <!-- Footer note -->
+    <text x="40" y="700" font-size="11" fill="#555">
+      Backend never holds user keys or signs txs — wallets remain the source of truth for execution; the backend only observes &amp; indexes.
+    </text>
+  </svg>
+</div>
+</body>
+</html>
