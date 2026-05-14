@@ -74,25 +74,27 @@ function formatWei(val: string): string {
 }
 
 function MetadataPreview({ raw }: { raw: string }) {
+  let parsedObj: Record<string, unknown> | null = null;
   try {
-    const obj = JSON.parse(raw);
-    const fields = Object.entries(AMOUNT_LABELS).filter(([k]) => k in obj);
-    if (fields.length === 0) return null;
-    return (
-      <div className="mt-1 flex flex-wrap gap-3 text-[10px] text-slate-500">
-        {fields.map(([k, label]) => (
-          <span key={k}>
-            {label}{" "}
-            <span className="font-medium text-slate-300">
-              {formatWei(String(obj[k]))}
-            </span>
-          </span>
-        ))}
-      </div>
-    );
+    parsedObj = JSON.parse(raw) as Record<string, unknown>;
   } catch {
     return null;
   }
+  if (!parsedObj) return null;
+  const fields = Object.entries(AMOUNT_LABELS).filter(([k]) => k in parsedObj!);
+  if (fields.length === 0) return null;
+  return (
+    <div className="mt-1 flex flex-wrap gap-3 text-[10px] text-slate-500">
+      {fields.map(([k, label]) => (
+        <span key={k}>
+          {label}{" "}
+          <span className="font-medium text-slate-300">
+            {formatWei(String(parsedObj![k]))}
+          </span>
+        </span>
+      ))}
+    </div>
+  );
 }
 
 // ── Timeline row ───────────────────────────────────────────────────────────

@@ -205,7 +205,12 @@ export async function runDemoTrade() {
         });
 
         if (decoded.eventName === "SwapPriceLogged") {
-          const { poolId, tick, sqrtPriceX96, timestamp } = decoded.args as any;
+          const { poolId, tick, sqrtPriceX96, timestamp } = decoded.args as {
+            poolId: `0x${string}`;
+            tick: bigint;
+            sqrtPriceX96: bigint;
+            timestamp: bigint;
+          };
 
           const evt: HookSwapEvent = {
             txHash: swapHash,

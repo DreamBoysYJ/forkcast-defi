@@ -19,11 +19,16 @@ export type RawUniPositionOverview = {
   sqrtPriceX96: bigint;
 };
 
+type IdCallItem = { status?: string; result?: bigint; error?: unknown };
+type PosCallItem = { status?: string; result?: RawUniPositionOverview; error?: unknown };
+
 // ⭐ 공통: 레이트 리밋 에러인지 문자열로 판별
 function isRateLimitError(err: unknown): boolean {
   if (!err) return false;
   const msg = String(
-    (err as any)?.shortMessage ?? (err as any)?.message ?? JSON.stringify(err)
+    (err as { shortMessage?: string; message?: string })?.shortMessage ??
+    (err as { message?: string })?.message ??
+    JSON.stringify(err)
   ).toLowerCase();
 
   return (
@@ -65,7 +70,7 @@ export function useUserUniPositions() {
     },
   });
 
-  const idResultsAny = (idResults ?? []) as any[];
+  const idResultsAny = (idResults ?? []) as IdCallItem[];
 
   const tokenIds: bigint[] =
     idResultsAny
@@ -106,7 +111,7 @@ export function useUserUniPositions() {
     },
   });
 
-  const posResultsAny = (posResults ?? []) as any[];
+  const posResultsAny = (posResults ?? []) as PosCallItem[];
 
   // allowFailure:true per-item 실패 노출
   const posItemErrors: Error[] = posResultsAny

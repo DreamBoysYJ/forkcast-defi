@@ -285,7 +285,7 @@ export function ClosePositionPreviewModal(
           setHasAllowance(false);
           setPhase("approve");
         }
-      } catch (e: any) {
+      } catch (e: unknown) {
         console.error("[ClosePreview] load failed", e);
         setLoadError("Failed to load close preview. Check console / RPC.");
       } finally {
@@ -374,7 +374,7 @@ export function ClosePositionPreviewModal(
         setPhase("close");
       } catch (e) {
         console.error("[ClosePreview] approve failed", e);
-        setTxError((e as any)?.shortMessage ?? (e as any)?.message ?? "Approve failed");
+        setTxError((e as { shortMessage?: string; message?: string })?.shortMessage ?? (e as Error)?.message ?? "Approve failed");
       } finally {
         setIsRunningTx(false);
       }
@@ -404,7 +404,7 @@ export function ClosePositionPreviewModal(
         setMode("done");
       } catch (e) {
         console.error("[ClosePreview] closePosition failed", e);
-        setTxError((e as any)?.shortMessage ?? (e as any)?.message ?? "Transaction failed");
+        setTxError((e as { shortMessage?: string; message?: string })?.shortMessage ?? (e as Error)?.message ?? "Transaction failed");
       } finally {
         setIsRunningTx(false);
       }

@@ -270,7 +270,7 @@ export function OpenPositionPreviewModal(props: OpenPositionPreviewModalProps) {
         setPhase("open");
       } catch (err) {
         console.error("approve failed", err);
-        setTxError((err as any)?.shortMessage ?? (err as any)?.message ?? "Approve failed");
+        setTxError((err as { shortMessage?: string; message?: string })?.shortMessage ?? (err as Error)?.message ?? "Approve failed");
       } finally {
         setIsRunningTx(false);
       }
@@ -310,7 +310,7 @@ export function OpenPositionPreviewModal(props: OpenPositionPreviewModalProps) {
         onClose();
       } catch (err) {
         console.error("openPosition failed", err);
-        setTxError((err as any)?.shortMessage ?? (err as any)?.message ?? "Transaction failed");
+        setTxError((err as { shortMessage?: string; message?: string })?.shortMessage ?? (err as Error)?.message ?? "Transaction failed");
       } finally {
         setIsRunningTx(false);
       }

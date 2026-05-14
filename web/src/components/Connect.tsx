@@ -10,6 +10,7 @@ export default function Connect() {
 
   // 👇 하이드레이션 불일치 방지용
   const [mounted, setMounted] = useState(false);
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => setMounted(true), []);
 
   if (!mounted) {

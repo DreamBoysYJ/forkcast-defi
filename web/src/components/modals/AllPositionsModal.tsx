@@ -32,12 +32,13 @@ export function AllPositionsModal({ isOpen, onClose }: Props) {
 
   useEffect(() => {
     if (!isOpen) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsLoading(true);
     setError(null);
     fetchAllOpenPositions(50)
       .then(setPositions)
       .catch((err: unknown) =>
-        setError((err as any)?.message ?? "Failed to load positions")
+        setError(err instanceof Error ? err.message : "Failed to load positions")
       )
       .finally(() => setIsLoading(false));
   }, [isOpen]);
