@@ -96,7 +96,7 @@ flowchart TD
 
 자세히 보기:
 
-- [backend/README.md](backend/README.ko.draft.md)
+- [backend/README.md](backend/README.md)
 - [데이터 모델](docs/backend/data-model.md)
 
 ### 스마트 컨트랙트
@@ -126,7 +126,7 @@ flowchart TD
 
 자세히 보기:
 
-- [web/README.ko.draft.md](web/README.ko.draft.md)
+- [web/README.ko.draft.md](web/README.md)
 - [docs/frontend/backend-integration-plan.md](docs/frontend/backend-integration-plan.md)
 
 ---
