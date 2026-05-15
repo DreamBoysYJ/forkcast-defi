@@ -12,6 +12,7 @@ import io.forkcast.backend.position.service.PositionTimelineService;
 import io.forkcast.backend.position.service.StrategyPositionService;
 import io.forkcast.backend.sync.client.Web3jChainClient;
 import io.forkcast.backend.sync.config.SyncProperties;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.web3j.protocol.core.methods.response.Log;
@@ -27,6 +28,7 @@ import static io.forkcast.backend.chain.support.EventTopics.*;
 
 @Service
 @Transactional
+@Slf4j
 public class EventSyncService {
 
   private static final String JOB_NAME = "event-sync";
@@ -184,6 +186,12 @@ public class EventSyncService {
 
       syncCursorService.advance(CURSOR_NAME, rangeEndBlock);
       jobRunService.markSuccess(jobRun.getId());
+      try {
+        int purged = jobRunService.purgeOlderThan(14);
+        if (purged > 0) log.info("purged {} job_run rows older than 14 days", purged);
+      } catch (Exception e) {
+        log.warn("job_run retention cleanup failed", e);
+      }
       Instant finishedAt = Instant.now();
       return EventSyncResult.success(
         JOB_NAME,

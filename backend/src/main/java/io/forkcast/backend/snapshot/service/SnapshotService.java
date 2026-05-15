@@ -120,6 +120,12 @@ public class SnapshotService {
 
       snapshotWriteService.saveAll(snapshots);
       jobRunService.markSuccess(jobRun.getId());
+      try {
+        int purged = snapshotWriteService.purgeOlderThan(7);
+        if (purged > 0) log.info("purged {} position_snapshot rows older than 7 days", purged);
+      } catch (Exception e) {
+        log.warn("position_snapshot retention cleanup failed", e);
+      }
 
       if (failedPositions > 0) {
         log.warn(
