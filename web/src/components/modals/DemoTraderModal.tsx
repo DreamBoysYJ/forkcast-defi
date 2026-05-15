@@ -54,11 +54,12 @@ export function DemoTraderModal({ isOpen, onClose }: DemoTraderModalProps) {
 
       alert(msg);
       onClose();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("[demo-trader] front error", err);
       const msg =
-        err?.message ??
-        "Failed to run demo trader. Please check server logs or try again.";
+        err instanceof Error
+          ? err.message
+          : "Failed to run demo trader. Please check server logs or try again.";
       alert(msg);
     } finally {
       setIsSubmitting(false);

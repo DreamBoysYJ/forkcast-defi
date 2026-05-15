@@ -45,12 +45,13 @@ export function PositionSnapshotModal({ isOpen, onClose, tokenId }: Props) {
 
   useEffect(() => {
     if (!isOpen) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsLoading(true);
     setError(null);
     fetchPositionSnapshots(tokenId, 20)
       .then(setSnapshots)
       .catch((err: unknown) =>
-        setError((err as any)?.message ?? "Failed to load snapshots")
+        setError(err instanceof Error ? err.message : "Failed to load snapshots")
       )
       .finally(() => setIsLoading(false));
   }, [isOpen, tokenId]);

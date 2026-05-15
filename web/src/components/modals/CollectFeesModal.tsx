@@ -38,6 +38,7 @@ export function CollectFeesModal({
   // 🔥 모달이 닫힐 때마다 상태 초기화
   useEffect(() => {
     if (!isOpen) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setCollected(null);
       setHasExecuted(false);
       setError(null);
@@ -66,9 +67,9 @@ export function CollectFeesModal({
       try {
         const res = await onPreview();
         setCollected(res);
-      } catch (e: any) {
+      } catch (e: unknown) {
         console.error("[CollectFeesModal] preview failed", e);
-        setError(e?.message ?? "Failed to preview fees.");
+        setError(e instanceof Error ? e.message : "Failed to preview fees.");
       }
       return;
     }
@@ -80,9 +81,9 @@ export function CollectFeesModal({
         setHasExecuted(true);
         // 필요하면 여기서 alert / toast
         // alert("Fees collected successfully.");
-      } catch (e: any) {
+      } catch (e: unknown) {
         console.error("[CollectFeesModal] execute failed", e);
-        setError(e?.message ?? "Failed to collect fees.");
+        setError(e instanceof Error ? e.message : "Failed to collect fees.");
       }
       return;
     }

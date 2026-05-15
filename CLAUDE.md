@@ -10,7 +10,47 @@
 
 Forkcast DeFi는 `contracts/`와 `web/`으로 구성된 DeFi monorepo다.
 
+실제 구조:
+```
+forkcast-defi/
+├── web/          # Next.js 프론트엔드
+├── backend/      # Spring Boot 오프체인 인덱서
+├── contracts/    # Foundry 스마트 컨트랙트
+├── docs/         # 설계 문서, 운영 로그
+└── api-spec.md   # 백엔드 API 명세
+```
+
 현재 목표는 기존 dApp에 Spring Boot 백엔드를 추가하고, 기존 프론트와 연결하는 것이다.
+
+## 현재 상태 (2026-05)
+
+- 프론트-백엔드 API 연동 5개 모두 완료 (상세: `docs/agent-logs/frontend.md`)
+- 현재 브랜치: `release/v2`
+- 백엔드 job lock, job run, snapshot 트랜잭션 hardening 완료 (R1~R4)
+
+## 명령어
+
+### Web (Next.js)
+```bash
+cd web && npm run dev    # 개발 서버 (localhost:3000)
+cd web && npm run build
+cd web && npm run lint
+```
+
+### Backend (Spring Boot)
+```bash
+cd backend && ./gradlew test
+cd backend && ./gradlew bootRun
+```
+백엔드 실행 시 필수 환경 변수:
+`RPC_URL`, `STRATEGY_ROUTER_ADDRESS`, `HOOK_ADDRESS`, `STRATEGY_LENS_ADDRESS`
+로컬에서는 `SCHEDULER_AUTH_ENABLED=false`, `APP_CORS_ALLOWED_ORIGINS=http://localhost:3000` 추가
+
+### Contracts (Foundry)
+```bash
+cd contracts && forge build
+cd contracts && forge test
+```
 
 ## 역할
 
@@ -30,6 +70,7 @@ Forkcast DeFi는 `contracts/`와 `web/`으로 구성된 DeFi monorepo다.
 
 먼저 읽기:
 
+- `backend/README.md`
 - `docs/backend/goal.md`
 - `docs/backend/data-model.md`
 - `api-spec.md`

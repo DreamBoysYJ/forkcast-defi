@@ -8,7 +8,9 @@ import { strategyRouterContract, strategyLensContract } from "@/lib/contracts";
 function isRateLimitError(err: unknown): boolean {
   if (!err) return false;
   const msg = String(
-    (err as any)?.shortMessage ?? (err as any)?.message ?? JSON.stringify(err)
+    (err as { shortMessage?: string; message?: string })?.shortMessage ??
+    (err as { message?: string })?.message ??
+    JSON.stringify(err)
   ).toLowerCase();
 
   return (
@@ -17,6 +19,16 @@ function isRateLimitError(err: unknown): boolean {
     msg.includes("rate limit")
   );
 }
+
+type RawContractView = {
+  core: { owner: `0x${string}`; vault: `0x${string}`; supplyAsset: `0x${string}`; borrowAsset: `0x${string}`; isOpen: boolean };
+  uniToken0: `0x${string}`; uniToken1: `0x${string}`; liquidity: bigint;
+  amount0Now: bigint; amount1Now: bigint; tickLower: bigint; tickUpper: bigint; currentTick: bigint;
+  totalCollateralBase: bigint; totalDebtBase: bigint; availableBorrowBase: bigint;
+  ltv: bigint; currentLiquidationThreshold: bigint; healthFactor: bigint;
+};
+
+type ContractCallItem = { status?: string; result?: unknown; error?: unknown };
 
 // 프론트에서 쓰기 좋은 형태
 export type StrategyPositionView = {
@@ -106,7 +118,7 @@ export function useStrategyPositionView() {
     },
   });
 
-  const mapToView = (raw: any, tokenId: bigint): StrategyPositionView => ({
+  const mapToView = (raw: RawContractView, tokenId: bigint): StrategyPositionView => ({
     tokenId,
     owner: raw.core.owner,
     vault: raw.core.vault,
@@ -134,8 +146,8 @@ export function useStrategyPositionView() {
   // allowFailure:true 는 top-level error를 세우지 않으므로 per-item 실패를 직접 추출
   const viewItemErrors: Error[] =
     (viewResults ?? [])
-      .filter((r: any) => r?.status === "failure")
-      .map((r: any) => r?.error);
+      .filter((r): boolean => (r as ContractCallItem)?.status === "failure")
+      .map((r) => (r as ContractCallItem)?.error as Error);
 
   if (viewItemErrors.length > 0) {
     console.error("[useStrategyPositionView] getStrategyPositionView per-item failures:", viewItemErrors);
@@ -145,13 +157,13 @@ export function useStrategyPositionView() {
     hasAnyToken &&
     viewResults !== undefined &&
     viewResults.length > 0 &&
-    viewResults.every((r: any) => r?.status === "failure");
+    viewResults.every((r) => (r as ContractCallItem)?.status === "failure");
 
-  let views: StrategyPositionView[] = [];
+  const views: StrategyPositionView[] = [];
 
   if (viewResults && tokenIds.length > 0) {
     for (let i = 0; i < viewResults.length; i++) {
-      const r: any = viewResults[i];
+      const r = viewResults[i] as ContractCallItem;
       if (!r) continue;
       const raw = r.result ?? r;
       if (!raw || !raw.core) continue;
