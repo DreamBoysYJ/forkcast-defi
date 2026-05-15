@@ -1,5 +1,50 @@
 # Backend Review Log
 
+## 2026-05-15 — data retention 구현 및 배포
+
+### 작업 목적
+
+`job_run`, `position_snapshot` 테이블이 삭제 로직 없이 무한 누적되는 문제를 해결한다.
+
+### 읽은 파일
+
+- `docs/backend/data-retention-policy.md`
+- `job/repository/JobRunRepository.java`
+- `job/service/JobRunService.java`
+- `snapshot/repository/PositionSnapshotRepository.java`
+- `snapshot/service/SnapshotWriteService.java`
+- `sync/service/EventSyncService.java`
+- `snapshot/service/SnapshotService.java`
+
+### 변경한 파일
+
+- `job/repository/JobRunRepository.java` — `deleteByStartedAtBefore` 추가 (`@Modifying @Query`)
+- `job/service/JobRunService.java` — `purgeOlderThan(int days)` 추가 (REQUIRES_NEW)
+- `snapshot/repository/PositionSnapshotRepository.java` — `deleteBySnapshotAtBefore` 추가
+- `snapshot/service/SnapshotWriteService.java` — `purgeOlderThan(int days)` 추가
+- `sync/service/EventSyncService.java` — job 성공 직후 `purgeOlderThan(14)` 호출
+- `snapshot/service/SnapshotService.java` — snapshot 성공 직후 `purgeOlderThan(7)` 호출
+- `test/JobRunServiceTest.java` — purge 테스트 2개 추가
+- `test/SnapshotWriteServiceTest.java` — 신규 생성, purge 테스트 2개
+- `docs/backend/data-retention-policy.md` — 확정 보존 기간 반영
+
+### 한 일
+
+- `job_run` 보존 기간 **14일** 확정, `position_snapshot` **7일** 확정
+- 별도 스케줄러 없이 기존 job 실행 말미에 purge 호출 추가
+- purge 실패 시 job 자체는 성공 처리되도록 try-catch로 감쌈
+- `gcloud run deploy forkcast-backend --source backend/` 로 배포 완료 (revision: `forkcast-backend-00009-jzb`)
+
+### 왜 그렇게 했는지
+
+- 별도 job/스케줄러를 만들면 구조가 복잡해지므로, 기존 job 말미에 붙이는 게 가장 단순함
+- purge는 부가 작업이므로 실패해도 job 상태에 영향 없어야 함
+- `REQUIRES_NEW`를 써서 purge 트랜잭션이 메인 트랜잭션과 독립적으로 커밋되도록 함
+
+### 남은 문제
+
+- 보존 기간(14일, 7일)이 코드에 하드코딩 — 나중에 env var로 분리 가능
+
 ## 2026-05-04 — job lock 정상 종료 시 즉시 해제
 
 ### 작업 목적

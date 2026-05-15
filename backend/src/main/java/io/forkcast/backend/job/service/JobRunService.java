@@ -7,6 +7,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+
 @Service
 @Transactional
 public class JobRunService {
@@ -47,6 +50,12 @@ public class JobRunService {
 
 
 
+
+  @Transactional(propagation = Propagation.REQUIRES_NEW)
+  public int purgeOlderThan(int days) {
+    Instant cutoff = Instant.now().minus(days, ChronoUnit.DAYS);
+    return jobRunRepository.deleteByStartedAtBefore(cutoff);
+  }
 
   @Transactional(readOnly = true)
   public JobRun getOrThrow(Long jobRunId) {

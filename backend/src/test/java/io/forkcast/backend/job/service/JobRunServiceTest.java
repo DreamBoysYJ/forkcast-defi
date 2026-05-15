@@ -11,6 +11,8 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.transaction.annotation.Transactional;
 
+import org.springframework.jdbc.core.JdbcTemplate;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -26,7 +28,13 @@ class JobRunServiceTest {
   private JobRunRepository jobRunRepository;
 
   @Autowired
+  private JobRunService jobRunService;
+
+  @Autowired
   private JobRunRollbackProbe jobRunRollbackProbe;
+
+  @Autowired
+  private JdbcTemplate jdbcTemplate;
 
   @BeforeEach
   void setUp() {
@@ -65,6 +73,31 @@ class JobRunServiceTest {
         assertThat(jobRun.getRangeStartBlock()).isEqualTo(100L);
         assertThat(jobRun.getRangeEndBlock()).isEqualTo(120L);
       });
+  }
+
+  @Test
+  void purgeOlderThan_deletesOldAndKeepsRecent() {
+    JobRun old = jobRunService.start("event-sync", null, null);
+    jdbcTemplate.update(
+      "UPDATE job_run SET started_at = NOW() - INTERVAL '15 days' WHERE id = ?",
+      old.getId()
+    );
+    jobRunService.start("event-sync", null, null);
+
+    int deleted = jobRunService.purgeOlderThan(14);
+
+    assertThat(deleted).isEqualTo(1);
+    assertThat(jobRunRepository.count()).isEqualTo(1);
+  }
+
+  @Test
+  void purgeOlderThan_doesNotDeleteWhenNothingIsOld() {
+    jobRunService.start("event-sync", null, null);
+
+    int deleted = jobRunService.purgeOlderThan(14);
+
+    assertThat(deleted).isEqualTo(0);
+    assertThat(jobRunRepository.count()).isEqualTo(1);
   }
 
   @TestConfiguration
