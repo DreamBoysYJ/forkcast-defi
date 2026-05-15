@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { formatUnits } from "viem";
 import { fetchPositionSnapshots, type SnapshotItem } from "@/lib/backendApi";
 
@@ -25,11 +25,41 @@ function fmtHF(str: string, frac = 4): string {
   return dot === -1 ? str : str.slice(0, dot + frac + 1);
 }
 
+function HFCell({
+  s,
+  prev,
+}: {
+  s: SnapshotItem;
+  prev: SnapshotItem | undefined;
+}) {
+  if (isNoDebt(s)) return <span className="text-emerald-400">No Debt</span>;
+  const cur = parseFloat(s.healthFactor);
+  const hfColor =
+    cur >= 1.5
+      ? "text-emerald-400"
+      : cur >= 1.1
+        ? "text-amber-400"
+        : "text-red-400";
+  let arrow: React.ReactNode = null;
+  if (prev && !isNoDebt(prev)) {
+    const diff = cur - parseFloat(prev.healthFactor);
+    if (diff > 0)
+      arrow = <span className="ml-1 text-green-400">↑</span>;
+    else if (diff < 0)
+      arrow = <span className="ml-1 text-red-400">↓</span>;
+  }
+  return (
+    <span className={hfColor}>
+      {fmtHF(s.healthFactor)}{arrow}
+    </span>
+  );
+}
+
 function fmtTimestamp(iso: string): string {
   const d = new Date(iso);
-  return Number.isNaN(d.getTime())
-    ? iso
-    : d.toLocaleString("en-GB", { hour12: false });
+  if (Number.isNaN(d.getTime())) return iso;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 type Props = {
@@ -102,7 +132,7 @@ export function PositionSnapshotModal({ isOpen, onClose, tokenId }: Props) {
               <thead className="sticky top-0 bg-slate-900/70 text-[11px] uppercase tracking-wide text-slate-400">
                 <tr>
                   <th className="px-4 py-2 text-left font-medium">
-                    Snapshot At
+                    Snapshot At : TIME
                   </th>
                   <th className="px-4 py-2 text-right font-medium">Block</th>
                   <th className="px-4 py-2 text-right font-medium">HF</th>
@@ -124,24 +154,10 @@ export function PositionSnapshotModal({ isOpen, onClose, tokenId }: Props) {
                       {fmtTimestamp(s.snapshotAt)}
                     </td>
                     <td className="px-4 py-3 text-right font-mono text-slate-400">
-                      {s.observedBlockNumber.toLocaleString()}
+                      {s.observedBlockNumber}
                     </td>
                     <td className="px-4 py-3 text-right font-mono">
-                      {isNoDebt(s) ? (
-                        <span className="text-emerald-400">No Debt</span>
-                      ) : (
-                        <span
-                          className={
-                            parseFloat(s.healthFactor) >= 1.5
-                              ? "text-emerald-400"
-                              : parseFloat(s.healthFactor) >= 1.1
-                                ? "text-amber-400"
-                                : "text-red-400"
-                          }
-                        >
-                          {fmtHF(s.healthFactor)}
-                        </span>
-                      )}
+                      <HFCell s={s} prev={snapshots[i + 1]} />
                     </td>
                     <td className="px-4 py-3 text-right font-mono text-slate-300">
                       ${fmtUnits(s.totalCollateralBase, 8, 2)}
