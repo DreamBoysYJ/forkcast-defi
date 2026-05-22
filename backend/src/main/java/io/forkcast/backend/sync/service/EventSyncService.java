@@ -14,20 +14,20 @@ import io.forkcast.backend.sync.client.Web3jChainClient;
 import io.forkcast.backend.sync.config.SyncProperties;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import org.web3j.protocol.core.methods.response.Log;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static io.forkcast.backend.chain.support.EventTopics.*;
 
 @Service
-@Transactional
 @Slf4j
 public class EventSyncService {
 
@@ -35,6 +35,7 @@ public class EventSyncService {
   private static final String CURSOR_NAME = "event-sync-finalized";
   private static final String LOCKED_BY = "local-instance";
   private static final long SAFE_HEAD_OFFSET = 5L;
+  private static final long MAX_BLOCKS_PER_RUN = 1_500L;
 
   private final JobLockService jobLockService;
   private final JobRunService jobRunService;
@@ -102,7 +103,7 @@ public class EventSyncService {
         .getOrCreate(CURSOR_NAME, initialCursor)
         .getLastSyncedBlock();
       long rangeStartBlock = currentLastSyncedBlock + 1;
-      long rangeEndBlock = safeHead;
+      long rangeEndBlock = Math.min(safeHead, rangeStartBlock + MAX_BLOCKS_PER_RUN - 1);
 
 
       if (rangeEndBlock < rangeStartBlock) {
@@ -151,6 +152,7 @@ public class EventSyncService {
       );
 
       int processedEvents = 0;
+      Map<Long, Instant> blockTimestampCache = new HashMap<>();
       for (Log log : logs) {
         EventLogDecoder.DecodedEvent decodedEvent = eventLogDecoder.decode(log);
         boolean inserted = rawChainEventService.saveIfAbsent(decodedEvent, log);
@@ -159,23 +161,28 @@ public class EventSyncService {
           continue;
         }
 
-
         if ("SwapPriceLogged".equals(decodedEvent.eventName())) {
           poolPriceEventService.saveIfAbsent(decodedEvent, log);
         }
 
         if ("PositionOpened".equals(decodedEvent.eventName())) {
+          Instant blockTimestamp = blockTimestampCache.computeIfAbsent(
+            decodedEvent.blockNumber(), web3jChainClient::getBlockTimestamp);
           strategyPositionService.applyOpened(decodedEvent);
-          positionTimelineService.appendOpened(decodedEvent);
+          positionTimelineService.appendOpened(decodedEvent, blockTimestamp);
         }
 
         if ("FeesCollected".equals(decodedEvent.eventName())) {
-          positionTimelineService.appendFeesCollected(decodedEvent);
+          Instant blockTimestamp = blockTimestampCache.computeIfAbsent(
+            decodedEvent.blockNumber(), web3jChainClient::getBlockTimestamp);
+          positionTimelineService.appendFeesCollected(decodedEvent, blockTimestamp);
         }
 
         if ("PositionClosed".equals(decodedEvent.eventName())) {
+          Instant blockTimestamp = blockTimestampCache.computeIfAbsent(
+            decodedEvent.blockNumber(), web3jChainClient::getBlockTimestamp);
           strategyPositionService.applyClosed(decodedEvent);
-          positionTimelineService.appendClosed(decodedEvent);
+          positionTimelineService.appendClosed(decodedEvent, blockTimestamp);
         }
 
         processedEvents++;
