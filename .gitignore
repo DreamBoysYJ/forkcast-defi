@@ -15,6 +15,14 @@ broadcast/
 # Claude Code
 .claude/
 
+# Tool artifacts
+.omc/
+backend/.omc/
+ai-ready-audit-*.html
+ai-ready-audit-*.json
+docs/backend-audit.html
+docs/backend-audit.md
+
 # OS/IDE
 .DS_Store
 *.log
