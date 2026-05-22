@@ -165,7 +165,7 @@ export function useStrategyPositionView() {
     for (let i = 0; i < viewResults.length; i++) {
       const r = viewResults[i] as ContractCallItem;
       if (!r) continue;
-      const raw = r.result ?? r;
+      const raw = (r.result ?? r) as RawContractView;
       if (!raw || !raw.core) continue;
       if (!raw.core.isOpen) continue;
       views.push(mapToView(raw, tokenIds[i]));
