@@ -11,8 +11,6 @@ public interface PendingTxRepository extends JpaRepository<PendingTx, Long> {
 
   Optional<PendingTx> findByTxHash(String txHash);
 
-  boolean existsByTxHash(String txHash);
-
   List<PendingTx> findTop20ByUserAddressOrderBySubmittedAtDesc(String userAddress);
 
   List<PendingTx> findTop20ByStatusOrderBySubmittedAtDesc(PendingTxStatus status);

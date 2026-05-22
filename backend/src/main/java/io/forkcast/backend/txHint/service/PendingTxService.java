@@ -17,9 +17,6 @@ public class PendingTxService {
   }
 
   public PendingTx create(String txHash, String actionType, String userAddress) {
-    if (pendingTxRepository.existsByTxHash(txHash)) {
-      throw new IllegalArgumentException("Pending tx already exists : " + txHash);
-    }
     PendingTx pendingTx = new PendingTx(txHash, actionType, userAddress);
     return pendingTxRepository.save(pendingTx);
   }
