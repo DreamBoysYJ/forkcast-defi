@@ -32,7 +32,7 @@ public class PositionTimelineService {
     this.objectMapper = objectMapper;
   }
 
-  public void appendOpened(EventLogDecoder.DecodedEvent event) {
+  public void appendOpened(EventLogDecoder.DecodedEvent event, Instant blockTimestamp) {
     long tokenId = event.uint256(4).longValueExact();
 
     positionTimelineRepository.save(
@@ -41,7 +41,7 @@ public class PositionTimelineService {
         "OPENED",
         event.txHash(),
         event.blockNumber(),
-        Instant.now(),
+        blockTimestamp,
         event.userAddress(),
         event.vaultAddress(),
         toJson(Map.of(
@@ -58,7 +58,7 @@ public class PositionTimelineService {
     );
   }
 
-  public void appendClosed(EventLogDecoder.DecodedEvent event) {
+  public void appendClosed(EventLogDecoder.DecodedEvent event, Instant blockTimestamp) {
     long tokenId = event.indexedUint256(2).longValueExact();
 
     positionTimelineRepository.save(
@@ -67,7 +67,7 @@ public class PositionTimelineService {
         "CLOSED",
         event.txHash(),
         event.blockNumber(),
-        Instant.now(),
+        blockTimestamp,
         event.userAddress(),
         event.vaultAddress(),
         toJson(Map.of(
@@ -80,7 +80,7 @@ public class PositionTimelineService {
     );
   }
 
-  public void appendFeesCollected(EventLogDecoder.DecodedEvent event) {
+  public void appendFeesCollected(EventLogDecoder.DecodedEvent event, Instant blockTimestamp) {
     long tokenId = event.indexedUint256(1).longValueExact();
 
     StrategyPosition strategyPosition = strategyPositionRepository.findById(tokenId)
@@ -94,7 +94,7 @@ public class PositionTimelineService {
         "FEES_COLLECTED",
         event.txHash(),
         event.blockNumber(),
-        Instant.now(),
+        blockTimestamp,
         event.userAddress(),
         strategyPosition.getVaultAddress(),
         toJson(Map.of(
