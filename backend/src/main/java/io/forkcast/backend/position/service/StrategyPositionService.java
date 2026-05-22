@@ -24,11 +24,7 @@ public class StrategyPositionService {
 
     long tokenId = event.uint256(4).longValueExact();
 
-    if (strategyPositionRepository.existsById(tokenId)) {
-      return ;
-    }
-
-    StrategyPosition strategyPosition = new StrategyPosition(
+    strategyPositionRepository.insertIfAbsent(
       tokenId,
       event.userAddress(),
       event.vaultAddress(),
@@ -40,8 +36,6 @@ public class StrategyPositionService {
       event.txHash(),
       null
     );
-
-    strategyPositionRepository.save(strategyPosition);
   }
 
   public void applyClosed(EventLogDecoder.DecodedEvent event) {
