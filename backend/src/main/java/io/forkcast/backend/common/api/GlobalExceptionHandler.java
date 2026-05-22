@@ -1,6 +1,7 @@
 package io.forkcast.backend.common.api;
 
 
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -17,6 +18,12 @@ public class GlobalExceptionHandler {
       fieldError.getField() + "must not be blank").orElse("Invalid request body");
 
     return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ApiErrorResponse.of("INVALID_REQUEST", message));
+  }
+
+  @ExceptionHandler(DataIntegrityViolationException.class)
+  public ResponseEntity<ApiErrorResponse> handleDataIntegrityViolation(DataIntegrityViolationException e) {
+    return ResponseEntity.status(HttpStatus.CONFLICT)
+      .body(ApiErrorResponse.of("DUPLICATE_TX_HASH", "이미 존재하는 트랜잭션입니다."));
   }
 
   @ExceptionHandler(IllegalArgumentException.class)
