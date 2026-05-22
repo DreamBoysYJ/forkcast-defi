@@ -1,5 +1,79 @@
 # Ops Agent Log
 
+## 2026-05-22 백엔드 재배포 (Wave 1/2 수정 반영)
+
+### 배포 내용
+
+- 브랜치: `fix/sync-infrastructure`
+- revision: `forkcast-backend-00011-bnc` (100% 트래픽)
+- URL: `https://forkcast-backend-799298411936.asia-northeast3.run.app`
+
+### 포함된 변경사항
+
+| 커밋 | 내용 |
+|------|------|
+| `261c23e` | C-3: DB 패스워드 환경변수화 (`${DB_PASSWORD}`) |
+| `334256a` | H-1: PendingTx TOCTOU 제거 (DB constraint → 409) |
+| `1d6c31d` | H-2: StrategyPosition TOCTOU 제거 (ON CONFLICT DO NOTHING) |
+| `951973a` | Wave 2: RPC/트랜잭션/타임스탬프/블록범위 개선 |
+
+### 추가된 시크릿
+
+- `DB_PASSWORD=forkcast-db-password:latest` (`--update-secrets`로 추가, 기존 secrets 유지)
+- 배포 전 Cloud Run에 `DB_PASSWORD`가 없었고 `application.yaml:9`에 기본값 없이 `${DB_PASSWORD}` 사용 → 미추가 시 기동 실패였음
+
+### 검증 결과
+
+- 헬스체크 `/actuator/health` → `UP`
+- CORS preflight `OPTIONS /api/positions/open` → `200`, `access-control-allow-origin: https://forcast-web-799298411936.asia-northeast3.run.app` 확인
+
+### 절차
+
+1. Cloud Scheduler (`forkcast-event-sync`, `forkcast-snapshot`) 일시 정지
+2. `gcloud run deploy --source backend/ --update-secrets "DB_PASSWORD=forkcast-db-password:latest"`
+3. 헬스/CORS 확인
+4. Cloud Scheduler 재개
+
+---
+
+## 2026-05-15 프론트 재배포 (State History UI 개선)
+
+### 배포 내용
+- 브랜치: `fix/web-state-history-ui`
+- 커밋: `d30dcd6` (fix(web): State History 모달 UI 개선)
+- 이미지: `gcr.io/forkcast-defi-demo/forcast-web:latest` (Cloud Build `3ec0be95`)
+- 서비스: `forcast-web` → revision `forcast-web-00010-k6b` (100% 트래픽)
+- URL: `https://forcast-web-799298411936.asia-northeast3.run.app`
+- HTTP 200 확인 완료
+
+### 배포 중 발생한 문제 — TypeScript 빌드 에러 3개
+
+첫 번째 `gcloud builds submit`이 실패했다. 이전 lint 수정 커밋(`7cb8adb`)과 UI 수정 커밋 사이에 생긴 TS 타입 에러 3개가 원인.
+
+| 파일 | 에러 | 수정 |
+|------|------|------|
+| `src/hooks/useStrategyPositionView.ts:169` | `raw`가 `unknown`으로 추론돼 `.core` 접근 불가 | `(r.result ?? r) as RawContractView`로 캐스팅 |
+| `src/hooks/useUserUniPositions.ts:119` | `.map()` 반환이 `unknown[]`인데 `Error[]`에 할당 | `.map((r) => r?.error as Error)` |
+| `src/lib/demoTrader.ts:208` | `decoded.args`를 `{ tick: bigint }`로 직접 캐스팅 불가 | `as unknown as { ... }`로 double assertion |
+
+`npx tsc --noEmit`으로 로컬 확인 후 재제출해서 성공.
+
+### 환경변수 주의
+- `NEXT_PUBLIC_BACKEND_URL`은 빌드 타임 arg로 주입 (`https://forkcast-backend-799298411936.asia-northeast3.run.app`)
+- Secrets: `HOUSE_PK`, `RPC_URL`, `DEMO_TRADER_PRIVATE_KEY` — `--set-secrets`로 기존과 동일하게 유지
+
+---
+
+## 2026-05-15 data retention 배포
+
+- revision `forkcast-backend-00009-jzb` → `forkcast-backend-00010-s8l`
+- 변경 내용: job_run 14일·position_snapshot 7일 retention 로직 추가
+- 00009는 `SnapshotWriteService.purgeOlderThan` 트랜잭션 전파 누락(`REQUIRED` → `REQUIRES_NEW` 수정 후 재배포)
+- 배포 방식: `gcloud run deploy forkcast-backend --source backend/ --region asia-northeast3`
+- 헬스 확인: `UP`
+
+---
+
 ## 2026-05-08 release/v2 배포 및 장애 대응
 
 ### 배포 내용

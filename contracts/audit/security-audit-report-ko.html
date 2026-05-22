@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>보안 감사 리포트 — Forkcast DeFi 컨트랙트</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #0d1117; --bg-card: #161b22; --bg-sidebar: #0d1117;
+  --bg-header: rgba(13,17,23,0.92); --text: #e6edf3; --text-muted: #7d8590;
+  --text-heading: #f0f6fc; --border: #30363d; --accent: #58a6ff;
+  --accent-hover: #79c0ff; --code-bg: #161b22; --code-border: #30363d;
+  --pre-bg: #0d1117; --table-head: #161b22; --table-alt: #0d1117;
+  --blockquote-border: #388bfd; --blockquote-bg: rgba(56,139,253,0.08);
+  --sidebar-w: 272px; --header-h: 56px; --shadow: 0 1px 3px rgba(0,0,0,0.4);
+}
+[data-theme="light"] {
+  --bg: #ffffff; --bg-card: #f6f8fa; --bg-sidebar: #f6f8fa;
+  --bg-header: rgba(255,255,255,0.92); --text: #1f2328; --text-muted: #57606a;
+  --text-heading: #1f2328; --border: #d0d7de; --accent: #0969da;
+  --accent-hover: #0550ae; --code-bg: #f6f8fa; --code-border: #d0d7de;
+  --pre-bg: #f6f8fa; --table-head: #f6f8fa; --table-alt: #ffffff;
+  --blockquote-border: #0969da; --blockquote-bg: rgba(9,105,218,0.06);
+  --shadow: 0 1px 3px rgba(0,0,0,0.12);
+}
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 15px; line-height: 1.7; color: var(--text); background: var(--bg); min-height: 100vh; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { color: var(--accent-hover); text-decoration: underline; }
+.site-header { position: fixed; top: 0; left: 0; right: 0; height: var(--header-h); background: var(--bg-header); backdrop-filter: blur(12px); border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 20px; z-index: 100; gap: 16px; }
+.header-title { font-size: 14px; font-weight: 600; color: var(--text-heading); flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.header-meta { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+.theme-toggle { background: none; border: 1px solid var(--border); color: var(--text-muted); border-radius: 6px; padding: 5px 10px; font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: all 0.15s; white-space: nowrap; }
+.theme-toggle:hover { border-color: var(--accent); color: var(--accent); }
+.layout { display: flex; padding-top: var(--header-h); min-height: 100vh; }
+.sidebar { width: var(--sidebar-w); min-width: var(--sidebar-w); background: var(--bg-sidebar); border-right: 1px solid var(--border); position: fixed; top: var(--header-h); left: 0; bottom: 0; overflow-y: auto; padding: 20px 0 40px; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+.sidebar::-webkit-scrollbar { width: 4px; }
+.sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+.sidebar-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); padding: 0 20px 8px; }
+.sidebar ul { list-style: none; }
+.sidebar li a { display: block; padding: 4px 20px; font-size: 13px; color: var(--text-muted); border-left: 2px solid transparent; transition: all 0.12s; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.sidebar li a:hover, .sidebar li a.active { color: var(--text); border-left-color: var(--accent); background: rgba(88,166,255,0.06); text-decoration: none; }
+.sidebar li.nav-h1 > a { font-weight: 600; color: var(--text); font-size: 13px; }
+.sidebar li.nav-h2 > a { padding-left: 28px; }
+.sidebar li.nav-h3 > a { padding-left: 40px; font-size: 12px; }
+.main { flex: 1; margin-left: var(--sidebar-w); padding: 40px 48px 80px; max-width: calc(var(--sidebar-w) + 900px); width: 100%; }
+.content-body { max-width: 860px; }
+.content-body h1 { font-size: 28px; font-weight: 700; color: var(--text-heading); border-bottom: 1px solid var(--border); padding-bottom: 12px; margin: 32px 0 20px; line-height: 1.3; }
+.content-body h1:first-child { margin-top: 0; }
+.content-body h2 { font-size: 20px; font-weight: 600; color: var(--text-heading); border-bottom: 1px solid var(--border); padding-bottom: 8px; margin: 36px 0 16px; }
+.content-body h3 { font-size: 16px; font-weight: 600; color: var(--text-heading); margin: 28px 0 12px; }
+.content-body h4 { font-size: 14px; font-weight: 600; color: var(--text-heading); margin: 20px 0 8px; }
+.content-body p { margin: 0 0 14px; }
+.content-body ul.content-list, .content-body ol.content-list { margin: 0 0 14px 24px; }
+.content-body ul.content-list li, .content-body ol.content-list li { margin: 4px 0; }
+.content-body strong { font-weight: 600; color: var(--text-heading); }
+.content-body hr.divider { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11.5px; font-weight: 600; letter-spacing: 0.03em; white-space: nowrap; vertical-align: middle; }
+.badge-critical { background: rgba(239,68,68,0.15); color: #f87171; border: 1px solid rgba(239,68,68,0.3); }
+.badge-high     { background: rgba(249,115,22,0.15); color: #fb923c; border: 1px solid rgba(249,115,22,0.3); }
+.badge-medium   { background: rgba(234,179,8,0.15);  color: #facc15; border: 1px solid rgba(234,179,8,0.3); }
+.badge-low      { background: rgba(59,130,246,0.15); color: #60a5fa; border: 1px solid rgba(59,130,246,0.3); }
+.badge-info     { background: rgba(107,114,128,0.15); color: #9ca3af; border: 1px solid rgba(107,114,128,0.3); }
+[data-theme="light"] .badge-critical { background: #fee2e2; color: #dc2626; border-color: #fca5a5; }
+[data-theme="light"] .badge-high     { background: #ffedd5; color: #ea580c; border-color: #fdba74; }
+[data-theme="light"] .badge-medium   { background: #fef9c3; color: #ca8a04; border-color: #fde047; }
+[data-theme="light"] .badge-low      { background: #dbeafe; color: #2563eb; border-color: #93c5fd; }
+[data-theme="light"] .badge-info     { background: #f3f4f6; color: #4b5563; border-color: #d1d5db; }
+.table-wrap { overflow-x: auto; margin: 16px 0 20px; border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); }
+.data-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.data-table th { background: var(--table-head); color: var(--text-heading); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.data-table td { padding: 9px 14px; border-bottom: 1px solid var(--border); vertical-align: middle; line-height: 1.5; }
+.data-table tr:last-child td { border-bottom: none; }
+.data-table tr:nth-child(even) td { background: var(--table-alt); }
+.data-table tr:hover td { background: rgba(88,166,255,0.04); }
+code.inline-code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 12.5px; background: var(--code-bg); border: 1px solid var(--code-border); border-radius: 4px; padding: 1px 6px; color: #e06c75; }
+[data-theme="light"] code.inline-code { color: #d73a49; }
+pre { background: var(--pre-bg); border: 1px solid var(--border); border-radius: 8px; padding: 16px 20px; overflow-x: auto; margin: 14px 0 20px; box-shadow: var(--shadow); scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+pre::-webkit-scrollbar { height: 4px; }
+pre::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+code.code-block { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 13px; line-height: 1.6; color: #c9d1d9; display: block; white-space: pre; }
+[data-theme="light"] code.code-block { color: #24292f; }
+blockquote.callout { border-left: 3px solid var(--blockquote-border); background: var(--blockquote-bg); border-radius: 0 6px 6px 0; padding: 12px 18px; margin: 14px 0 20px; font-size: 14px; color: var(--text-muted); }
+blockquote.callout p { margin: 0; }
+blockquote.callout strong { color: var(--text); }
+.reading-progress { position: fixed; top: var(--header-h); left: 0; right: 0; height: 2px; background: var(--border); z-index: 99; }
+.reading-progress-bar { height: 100%; background: var(--accent); width: 0%; transition: width 0.1s; }
+@media (max-width: 768px) { .sidebar { display: none; } .main { margin-left: 0; padding: 24px 20px 60px; } }
+</style>
+</head>
+<body>
+<div class="reading-progress"><div class="reading-progress-bar" id="progressBar"></div></div>
+<header class="site-header">
+  <span class="header-title">보안 감사 리포트 — Forkcast DeFi 컨트랙트</span>
+  <span class="header-meta">security-audit-report-ko.html &nbsp;·&nbsp; 2026-05-20 생성</span>
+  <button class="theme-toggle" onclick="toggleTheme()" id="themeBtn">☀️ 라이트</button>
+</header>
+<div class="layout">
+  <nav class="sidebar" id="sidebar">
+    <div class="sidebar-label">목차</div>
+    <ul id="navList">
+      <li class="nav-h1"><a href="#보안-감사-리포트">보안 감사 리포트</a></li>
+      <li class="nav-h2"><a href="#요약">요약</a></li>
+      <li class="nav-h2"><a href="#감사-범위">감사 범위</a></li>
+      <li class="nav-h2"><a href="#취약점-목록">취약점 목록</a></li>
+      <li class="nav-h3"><a href="#c-01">C-01: setRouter 접근 제어 없음</a></li>
+      <li class="nav-h3"><a href="#c-02">C-02: createAccount 매핑 덮어쓰기</a></li>
+      <li class="nav-h3"><a href="#h-01">H-01: execute 재진입 방어 없음</a></li>
+      <li class="nav-h3"><a href="#h-02">H-02: _readSlot0 잘못된 슬롯</a></li>
+      <li class="nav-h3"><a href="#h-03">H-03: SafeCast 하한 체크 누락</a></li>
+      <li class="nav-h3"><a href="#m-01">M-01: createAccount 덮어쓰기 방지 없음</a></li>
+      <li class="nav-h3"><a href="#m-02">M-02: 비표준 ERC20 미지원</a></li>
+      <li class="nav-h3"><a href="#m-03">M-03: 슬리피지 체크 오류 + deadline 없음</a></li>
+      <li class="nav-h3"><a href="#m-04">M-04: 단일 슬롯 오라클 설계</a></li>
+      <li class="nav-h3"><a href="#l-01">L-01: getPositions 배치 전체 revert</a></li>
+      <li class="nav-h3"><a href="#l-02">L-02: 오너십 이전 불가</a></li>
+      <li class="nav-h3"><a href="#l-03">L-03: Floating pragma</a></li>
+      <li class="nav-h3"><a href="#l-04">L-04: HookFactory 퍼미션리스</a></li>
+      <li class="nav-h3"><a href="#i-01">I-01: 라우터 모듈 스텁</a></li>
+      <li class="nav-h3"><a href="#i-02">I-02: 테스트 전부 placeholder</a></li>
+      <li class="nav-h3"><a href="#i-03">I-03: TStore 미사용</a></li>
+      <li class="nav-h2"><a href="#테스트-커버리지-분석">테스트 커버리지 분석</a></li>
+      <li class="nav-h2"><a href="#감사-방법론">감사 방법론</a></li>
+    </ul>
+  </nav>
+  <main class="main">
+    <div class="content-body" id="contentBody">
+
+<h1 id="보안-감사-리포트">보안 감사 리포트 — Forkcast DeFi 컨트랙트</h1>
+
+<p><strong>감사일:</strong> 2026-05-20<br>
+<strong>감사자:</strong> solidity-auditor (Claude Code)<br>
+<strong>저장소:</strong> <code class="inline-code">forkcast-defi/contracts/</code><br>
+<strong>브랜치:</strong> <code class="inline-code">fix/web-state-history-ui</code></p>
+
+<hr class="divider">
+
+<h2 id="요약">요약</h2>
+
+<p><code class="inline-code">contracts/src/</code>의 프로덕션 솔리디티 소스 파일에 대한 전문 보안 감사를 수행했습니다. 이 코드베이스는 Aave v3와 Uniswap v4를 결합한 초기 단계의 DeFi 모노레포입니다. 다수의 <strong>Critical</strong> 및 <strong>High</strong> 심각도 취약점이 발견됐습니다. 가장 심각한 취약점은 외부 공격자가 모든 사용자 스마트 계정을 완전히 제어하고 자금을 탈취할 수 있게 합니다. 메인넷 배포 전에 반드시 해결해야 합니다.</p>
+
+<div class="table-wrap">
+<table class="data-table">
+<thead><tr><th>심각도</th><th>개수</th></tr></thead>
+<tbody>
+<tr><td><span class="badge badge-critical">Critical</span></td><td>2</td></tr>
+<tr><td><span class="badge badge-high">High</span></td><td>3</td></tr>
+<tr><td><span class="badge badge-medium">Medium</span></td><td>4</td></tr>
+<tr><td><span class="badge badge-low">Low</span></td><td>4</td></tr>
+<tr><td><span class="badge badge-info">Informational</span></td><td>3</td></tr>
+</tbody>
+</table>
+</div>
+
+<blockquote class="callout"><p><strong><code class="inline-code">AccountFactory</code>의 두 가지 Critical 취약점(C-01, C-02)은 배포 전 필수 해결 항목입니다. 해결 전까지 시스템에 사용자 자금이 유입되어서는 안 됩니다.</strong></p></blockquote>
+
+<hr class="divider">
+
+<h2 id="감사-범위">감사 범위</h2>
+
+<h3 id="감사-대상">감사 대상 (프로덕션 <code class="inline-code">src/</code>)</h3>
+
+<pre><code class="code-block">src/router/StrategyRouter.sol          (스텁 — 컴파일 불가)
+src/router/AaveModule.sol              (스텁)
+src/router/UniswapV4Module.sol         (스텁 — 잘못된 솔리디티 문법)
+src/accounts/UserAccount.sol           ← 주요 감사 대상
+src/factory/AccountFactory.sol         ← 주요 감사 대상
+src/lens/StrategyLens.sol
+src/hook/SwapPriceLoggerHook.sol
+src/hook/HookFactory.sol
+src/uniswapV4/Miniv4SwapRouter.sol
+src/libs/UniswapV4LiquidityPreview.sol
+src/libs/Hooks.sol
+src/libs/HookMiner.sol
+src/libs/SafeCast.sol
+src/utils/TStore.sol
+src/interfaces/IERC20.sol</code></pre>
+
+<h3 id="참고용">참고용 (취약점 감사 제외)</h3>
+<p><code class="inline-code">lib/v4-core</code>, <code class="inline-code">lib/v4-periphery</code>, <code class="inline-code">test/</code> (빈 placeholder 테스트 파일)</p>
+
+<h3 id="전제-조건">전제 조건</h3>
+<ul class="content-list">
+<li>v4 <code class="inline-code">PoolId = keccak256(abi.encode(poolKey))</code> — <code class="inline-code">lib/v4-core/src/types/PoolId.sol</code>로 확인</li>
+<li>v4 풀 상태 베이스 슬롯: <code class="inline-code">keccak256(abi.encodePacked(poolId, bytes32(uint256(6))))</code>, <code class="inline-code">POOLS_SLOT = 6</code> — <code class="inline-code">StateLibrary.sol</code>로 확인</li>
+<li><code class="inline-code">BaseHook</code> 생성자는 <code class="inline-code">validateHookAddress(this)</code>를 호출하며 플래그 불일치 시 revert — <code class="inline-code">lib/v4-periphery</code>로 확인</li>
+<li>백엔드는 읽기 전용이며 사용자 트랜잭션을 직접 전송하지 않음. "백엔드가 사용자를 프론트런"하는 시나리오는 프로젝트 설계상 위협 범위에 포함되지 않음</li>
+</ul>
+
+<hr class="divider">
+
+<h2 id="취약점-목록">취약점 목록</h2>
+
+<h3 id="전체-요약">전체 요약</h3>
+
+<div class="table-wrap">
+<table class="data-table">
+<thead><tr><th>ID</th><th>제목</th><th>심각도</th></tr></thead>
+<tbody>
+<tr><td>C-01</td><td><code class="inline-code">AccountFactory.setRouter</code> 접근 제어 없음 — 누구나 라우터를 교체하고 모든 계정을 제어 가능</td><td><span class="badge badge-critical">Critical</span></td></tr>
+<tr><td>C-02</td><td><code class="inline-code">createAccount</code> 매핑 덮어쓰기 가능, 라우터 신뢰가 오너 승인 없이 설정됨</td><td><span class="badge badge-critical">Critical</span></td></tr>
+<tr><td>H-01</td><td><code class="inline-code">UserAccount.execute</code>가 재진입 방어 없는 범용 임의 호출 프리미티브</td><td><span class="badge badge-high">High</span></td></tr>
+<tr><td>H-02</td><td><code class="inline-code">SwapPriceLoggerHook._readSlot0</code>이 잘못된 스토리지 슬롯을 읽어 온체인 가격 데이터가 손상됨</td><td><span class="badge badge-high">High</span></td></tr>
+<tr><td>H-03</td><td><code class="inline-code">SafeCast.toInt128</code> 하한 체크 누락 — 부호 있는 정수 묵인 절삭</td><td><span class="badge badge-high">High</span></td></tr>
+<tr><td>M-01</td><td><code class="inline-code">AccountFactory.createAccount</code>에 기존 계정 덮어쓰기 방지 장치 없음</td><td><span class="badge badge-medium">Medium</span></td></tr>
+<tr><td>M-02</td><td><code class="inline-code">UserAccount</code>가 raw <code class="inline-code">transfer</code>/<code class="inline-code">approve</code> 사용 — 비표준 ERC20 토큰에서 오작동</td><td><span class="badge badge-medium">Medium</span></td></tr>
+<tr><td>M-03</td><td><code class="inline-code">Miniv4SwapRouter</code> 슬리피지 체크가 부호 추론에 의존; deadline 파라미터 없음</td><td><span class="badge badge-medium">Medium</span></td></tr>
+<tr><td>M-04</td><td><code class="inline-code">SwapPriceLoggerHook</code>이 단일 관찰 슬롯만 덮어쓰면서 오라클처럼 카운팅</td><td><span class="badge badge-medium">Medium</span></td></tr>
+<tr><td>L-01</td><td><code class="inline-code">StrategyLens.getPositions</code>가 잘못된 계정 하나에 전체 배치 revert</td><td><span class="badge badge-low">Low</span></td></tr>
+<tr><td>L-02</td><td><code class="inline-code">UserAccount</code>에 오너십 이전 메커니즘 없음</td><td><span class="badge badge-low">Low</span></td></tr>
+<tr><td>L-03</td><td>모든 컨트랙트에 Floating pragma <code class="inline-code">^0.8.24</code> 사용</td><td><span class="badge badge-low">Low</span></td></tr>
+<tr><td>L-04</td><td><code class="inline-code">HookFactory.deploy</code>가 퍼미션리스; 이벤트에 indexed 필드 없음</td><td><span class="badge badge-low">Low</span></td></tr>
+<tr><td>I-01</td><td>핵심 라우터 모듈이 스텁; <code class="inline-code">UniswapV4Module</code>에 잘못된 솔리디티 문법</td><td><span class="badge badge-info">Informational</span></td></tr>
+<tr><td>I-02</td><td>테스트 스위트가 전부 빈 placeholder</td><td><span class="badge badge-info">Informational</span></td></tr>
+<tr><td>I-03</td><td><code class="inline-code">TStore</code> 라이브러리가 어디서도 import되지 않음</td><td><span class="badge badge-info">Informational</span></td></tr>
+</tbody>
+</table>
+</div>
+
+<hr class="divider">
+
+<h3 id="c-01">[C-01] <code class="inline-code">AccountFactory.setRouter</code>에 접근 제어 없음 — 누구나 라우터를 탈취 가능</h3>
+
+<p><strong>심각도:</strong> <span class="badge badge-critical">Critical</span><br>
+<strong>위치:</strong> <code class="inline-code">src/factory/AccountFactory.sol:12-14</code></p>
+
+<p><strong>설명:</strong></p>
+
+<pre><code class="code-block">address public router;
+
+function setRouter(address _router) external {   // ← 접근 제한 없음
+    router = _router;
+}
+
+function createAccount(address user) external returns (address) {
+    address account = address(new UserAccount());
+    UserAccount(payable(account)).initialize(user, router);  // router가 계정에 고정됨
+    accountOf[user] = account;
+    return account;
+}</code></pre>
+
+<p><code class="inline-code">setRouter</code>에 <code class="inline-code">onlyOwner</code> 등의 접근 제한이 없습니다. 여기서 저장된 <code class="inline-code">router</code> 주소는 모든 <code class="inline-code">UserAccount</code>에 유일한 권한 게이트(<code class="inline-code">onlyRouter</code>)로 주입됩니다. <code class="inline-code">UserAccount.execute</code>(H-01)는 라우터가 계정 내부에서 임의의 외부 호출을 실행하도록 허용합니다. 따라서 계정 생성 시점에 <code class="inline-code">router</code>를 제어하는 주체가 그 계정의 자금을 영구적으로 제어하게 됩니다.</p>
+
+<p><strong>공격 시나리오:</strong></p>
+<ol class="content-list">
+<li>공격자가 <code class="inline-code">factory.setRouter(attackerContract)</code>를 호출합니다.</li>
+<li>피해자 또는 운영자가 <code class="inline-code">factory.createAccount(victim)</code>를 호출합니다. 새 계정은 <code class="inline-code">router = attackerContract</code>로 초기화됩니다.</li>
+<li>피해자가 새로 생성된 계정에 토큰을 예치합니다.</li>
+<li>공격자가 <code class="inline-code">attackerContract</code>를 통해 <code class="inline-code">userAccount.execute(USDC, 0, abi.encodeCall(IERC20.transfer, (attacker, balance)))</code>를 호출해 계정을 탈취합니다.</li>
+</ol>
+
+<p><strong>권고 수정 방법:</strong></p>
+<p><code class="inline-code">router</code>를 immutable로 선언하고 생성자에서 설정합니다. 가변성이 필요한 경우 접근 제어와 타임락을 추가합니다:</p>
+
+<pre><code class="code-block">contract AccountFactory {
+    address public immutable router;
+    address public immutable owner;
+
+    constructor(address _router) {
+        router = _router;
+        owner = msg.sender;
+    }
+}</code></pre>
+
+<p><strong>참고:</strong> SWC-105 (보호되지 않은 Ether 인출), SWC-118 (잘못된 생성자)</p>
+
+<hr class="divider">
+
+<h3 id="c-02">[C-02] <code class="inline-code">createAccount</code> 매핑 덮어쓰기 가능, 라우터 신뢰가 오너 승인 없이 설정됨</h3>
+
+<p><strong>심각도:</strong> <span class="badge badge-critical">Critical</span><br>
+<strong>위치:</strong> <code class="inline-code">src/factory/AccountFactory.sol:16-21</code>, <code class="inline-code">src/accounts/UserAccount.sol:38-43</code></p>
+
+<p><strong>설명:</strong></p>
+<p><code class="inline-code">accountOf[user] = account</code>는 조건 없이 덮어씁니다. <code class="inline-code">createAccount(victim)</code>을 두 번 호출하면 기존 계정의 매핑 항목이 덮어써지고, 원래 계정에 보관된 자금이 고립됩니다. 공격자는 임의의 <code class="inline-code">user</code> 주소에 대해 이를 자유롭게 호출할 수 있습니다. C-01과 결합하면 계정의 <code class="inline-code">router</code> 값은 공격자가 설정한 값이 되어 계정 오너의 승인 없이 결정됩니다.</p>
+
+<p><strong>공격 시나리오:</strong></p>
+<ol class="content-list">
+<li>피해자의 계정에 자금이 예치되어 있고 <code class="inline-code">accountOf[victim]</code>이 <code class="inline-code">account_A</code>를 가리킵니다.</li>
+<li>공격자가 <code class="inline-code">createAccount(victim)</code>을 호출(퍼미션리스)합니다. <code class="inline-code">accountOf[victim]</code>이 이제 <code class="inline-code">account_B</code>(비어있고 공격자 라우터)를 가리킵니다.</li>
+<li>프론트엔드/인덱서가 <code class="inline-code">accountOf[victim]</code>으로 피해자의 계정을 조회합니다. 새로운 예치금이 <code class="inline-code">account_B</code>로 흘러 들어가고 공격자가 이를 탈취합니다.</li>
+</ol>
+
+<p><strong>권고 수정 방법:</strong></p>
+<p>재생성을 방지하고 CREATE2를 사용해 결정론적 주소를 생성합니다:</p>
+
+<pre><code class="code-block">function createAccount(address user) external returns (address) {
+    require(accountOf[user] == address(0), "already exists");
+    address account = address(
+        new UserAccount{salt: keccak256(abi.encode(user))}()
+    );
+    UserAccount(payable(account)).initialize(user, router);
+    accountOf[user] = account;
+    return account;
+}</code></pre>
+
+<p>사용자 본인만 계정을 생성할 수 있도록 <code class="inline-code">msg.sender == user</code> 체크도 추가를 권장합니다.</p>
+<p><strong>참고:</strong> SWC-118, SWC-114 (트랜잭션 순서 의존성)</p>
+
+<hr class="divider">
+
+<h3 id="h-01">[H-01] <code class="inline-code">UserAccount.execute</code>가 재진입 방어 없는 범용 임의 호출 프리미티브</h3>
+
+<p><strong>심각도:</strong> <span class="badge badge-high">High</span> (C-01/C-02 미해결 시 Critical)<br>
+<strong>위치:</strong> <code class="inline-code">src/accounts/UserAccount.sol:55-64</code></p>
+
+<p><strong>설명:</strong></p>
+
+<pre><code class="code-block">function execute(address target, uint256 value, bytes calldata data)
+    external onlyRouter returns (bytes memory)
+{
+    (bool success, bytes memory result) = target.call{value: value}(data);
+    require(success, "call failed");
+    return result;
+}</code></pre>
+
+<p>이것은 완전히 범용적인 "무엇이든 호출" 프리미티브입니다. 모든 사용자 자금의 보안 모델이 "라우터를 신뢰할 수 있는가?"로 귀결됩니다. C-01/C-02에 의해 현재 라우터는 배포 시점에 공격자가 제어할 수 있습니다.</p>
+<p>정직한 라우터라도 재진입 방어가 없습니다. 악의적인 ERC777 토큰이나 훅 조작 풀이 잔액이 정산되기 전에 <code class="inline-code">execute</code>나 <code class="inline-code">withdraw</code>로 재진입할 수 있습니다.</p>
+<p>프로젝트에는 이미 현재 미사용 중인 <code class="inline-code">TStore.sol</code>(EIP-1153 트랜지언트 스토리지)이 있습니다 — 여기가 자연스러운 활용처입니다.</p>
+
+<p><strong>권고 수정 방법:</strong></p>
+<ul class="content-list">
+<li>범용 <code class="inline-code">execute</code>를 타입화된 함수로 교체합니다: <code class="inline-code">supply(asset, amount)</code>, <code class="inline-code">borrow(asset, amount)</code>, <code class="inline-code">swap(...)</code> — 각각 신뢰된 대상 주소를 하드코딩</li>
+<li>범용 프리미티브를 유지한다면 대상을 허용 목록(Aave 풀, PoolManager)으로 제한합니다</li>
+<li>기존 <code class="inline-code">TStore</code> 라이브러리를 활용해 재진입 방어를 추가합니다:</li>
+</ul>
+
+<pre><code class="code-block">bool private _entered;
+modifier nonReentrant() {
+    require(!_entered, "reentrant");
+    _entered = true;
+    _;
+    _entered = false;
+}</code></pre>
+
+<p><strong>참고:</strong> SWC-107 (재진입), SWC-105</p>
+
+<hr class="divider">
+
+<h3 id="h-02">[H-02] <code class="inline-code">SwapPriceLoggerHook._readSlot0</code>이 잘못된 스토리지 슬롯을 읽음 — 가격 데이터 손상</h3>
+
+<p><strong>심각도:</strong> <span class="badge badge-high">High</span><br>
+<strong>위치:</strong> <code class="inline-code">src/hook/SwapPriceLoggerHook.sol:88-98</code></p>
+
+<p><strong>설명:</strong></p>
+
+<pre><code class="code-block">function _readSlot0(bytes32 poolId) internal view returns (uint160 sqrtPriceX96, int24 tick) {
+    bytes32 slot = keccak256(abi.encode(poolId, uint256(6)));  // 잘못됨
+    bytes32 raw = poolManager.extsload(slot);
+    sqrtPriceX96 = uint160(uint256(raw));
+    tick = int24(int256(uint256(raw) >> 160));
+}</code></pre>
+
+<p>정확한 v4 슬롯 유도 방법 (<code class="inline-code">StateLibrary._getPoolStateSlot</code>에서 확인):</p>
+
+<pre><code class="code-block">keccak256(abi.encodePacked(poolId, bytes32(uint256(6))))  // POOLS_SLOT = 6</code></pre>
+
+<p>잘못된 유도로 인해 <code class="inline-code">extsload</code>가 잘못된 슬롯의 값(주로 0 또는 무관한 데이터)을 반환합니다. 모든 <code class="inline-code">PriceLogged</code> 이벤트와 <code class="inline-code">latestObservation[poolId]</code> 항목이 실제 풀 가격이 아닌 잘못된 값을 기록합니다. 인덱서, 프론트엔드 차트, 또는 미래에 이 데이터를 기반으로 포지션을 조정하는 전략이 손상된 값을 받게 됩니다.</p>
+
+<p><strong>권고 수정 방법:</strong></p>
+<p><code class="inline-code">StateLibrary</code>를 직접 사용합니다. 슬롯 계산을 직접 작성하지 않습니다:</p>
+
+<pre><code class="code-block">import {StateLibrary} from "v4-core/src/libraries/StateLibrary.sol";
+import {PoolId, PoolIdLibrary} from "v4-core/src/types/PoolId.sol";
+
+using StateLibrary for IPoolManager;
+using PoolIdLibrary for PoolKey;
+
+function _afterSwap(
+    address,
+    PoolKey calldata key,
+    IPoolManager.SwapParams calldata,
+    BalanceDelta,
+    bytes calldata
+) internal override returns (bytes4, int128) {
+    (uint160 sqrtPriceX96, int24 tick,,) = poolManager.getSlot0(key.toId());
+    // ... 나머지 스토리지 로직
+}</code></pre>
+
+<p><code class="inline-code">_readSlot0</code>과 <code class="inline-code">_getCurrentPrice</code>를 삭제합니다. 스왑 후 <code class="inline-code">latestObservation[poolId].sqrtPriceX96 == poolManager.getSlot0(id).sqrtPriceX96</code>를 검증하는 테스트를 추가합니다.</p>
+<p><strong>참고:</strong> v4 <code class="inline-code">StateLibrary</code>, SWC-110</p>
+
+<hr class="divider">
+
+<h3 id="h-03">[H-03] <code class="inline-code">SafeCast.toInt128</code> 하한 체크 누락 — 부호 있는 캐스팅 묵인</h3>
+
+<p><strong>심각도:</strong> <span class="badge badge-high">High</span><br>
+<strong>위치:</strong> <code class="inline-code">src/libs/SafeCast.sol:14-17</code></p>
+
+<p><strong>설명:</strong></p>
+
+<pre><code class="code-block">function toInt128(int256 x) internal pure returns (int128) {
+    if (x > type(int128).max) revert Overflow();   // 상한만 체크
+    return int128(x);                               // x &lt; type(int128).min은 묵인
+}</code></pre>
+
+<p><code class="inline-code">type(int128).min - 1</code> 값이 체크를 통과하고 잘못된, 잠재적으로 공격자에게 유리한 값으로 묵인됩니다. Uniswap v4 델타는 부호 있는 정수이며 음수가 빈번하므로, <code class="inline-code">toInt128</code>을 음수 델타에 호출하는 미래의 스왑 정산 코드가 정산 금액을 잘못 계산할 수 있습니다.</p>
+
+<p><strong>권고 수정 방법:</strong></p>
+
+<pre><code class="code-block">function toInt128(int256 x) internal pure returns (int128) {
+    if (x > type(int128).max || x &lt; type(int128).min) revert Overflow();
+    return int128(x);
+}</code></pre>
+
+<p>직접 작성한 버전 대신 <code class="inline-code">OpenZeppelin SafeCast</code> 또는 <code class="inline-code">v4-core SafeCast</code> 채택을 권장합니다.</p>
+<p><strong>참고:</strong> SWC-101 (정수 오버플로우/언더플로우)</p>
+
+<hr class="divider">
+
+<h3 id="m-01">[M-01] <code class="inline-code">AccountFactory.createAccount</code>에 기존 계정 덮어쓰기 방지 장치 없음</h3>
+
+<p><strong>심각도:</strong> <span class="badge badge-medium">Medium</span><br>
+<strong>위치:</strong> <code class="inline-code">src/factory/AccountFactory.sol:16-21</code></p>
+
+<p><strong>설명:</strong> C-02의 라우터 신뢰 문제와 별개로, <code class="inline-code">require(accountOf[user] == address(0))</code> 부재는 독립적인 그리핑(griefing) 벡터입니다. 누구나 매핑 항목을 덮어써 자금이 예치된 계정을 고립시킬 수 있습니다. 이전 계정의 자금은 사라지지 않지만(기존 컨트랙트에 남아있음) 팩토리를 통해 접근할 수 없게 됩니다.</p>
+
+<p><strong>권고 수정 방법:</strong> <code class="inline-code">createAccount</code> 첫 줄에 <code class="inline-code">require(accountOf[user] == address(0), "account exists")</code>를 추가합니다.</p>
+
+<hr class="divider">
+
+<h3 id="m-02">[M-02] <code class="inline-code">UserAccount</code>가 raw <code class="inline-code">IERC20.transfer</code>/<code class="inline-code">approve</code> 사용 — 비표준 토큰에서 오작동</h3>
+
+<p><strong>심각도:</strong> <span class="badge badge-medium">Medium</span><br>
+<strong>위치:</strong> <code class="inline-code">src/accounts/UserAccount.sol:71, 80</code></p>
+
+<p><strong>설명:</strong></p>
+
+<pre><code class="code-block">IERC20(token).approve(spender, amount);   // 반환값 무시
+IERC20(token).transfer(owner, amount);    // 반환값 무시</code></pre>
+
+<p>실패 시 <code class="inline-code">false</code>를 반환하는 일부 레거시 토큰은 묵인됩니다. 데이터를 반환하지 않는 토큰(메인넷 USDT)은 ABI 디코딩에서 revert됩니다. USDT 방식 토큰의 승인 호출은 먼저 0으로 리셋이 필요한데 이를 처리하지 않습니다. 커스터디 컨트랙트에서 이는 자금이 실제로는 이동하지 않았는데 로직이 성공으로 간주하는 상황을 만들 수 있습니다.</p>
+
+<p><strong>권고 수정 방법:</strong> <code class="inline-code">SafeERC20</code>의 <code class="inline-code">safeTransfer</code>, <code class="inline-code">forceApprove</code>로 교체합니다.</p>
+<p><strong>참고:</strong> SWC-104 (미확인 호출 반환값)</p>
+
+<hr class="divider">
+
+<h3 id="m-03">[M-03] <code class="inline-code">Miniv4SwapRouter</code> 슬리피지 체크가 부호 추론에 의존; deadline 파라미터 없음</h3>
+
+<p><strong>심각도:</strong> <span class="badge badge-medium">Medium</span><br>
+<strong>위치:</strong> <code class="inline-code">src/uniswapV4/Miniv4SwapRouter.sol:100-104</code></p>
+
+<p><strong>설명:</strong></p>
+
+<pre><code class="code-block">uint256 amountOut = amount0 > 0 ? uint256(amount0) : uint256(amount1);
+if (amountOut &lt; cbData.minAmountOut) revert TooLittleReceived(...);</code></pre>
+
+<p>표준 스왑에서는 하나의 델타가 양수(출력)이므로 추론이 동작합니다. 그러나 <code class="inline-code">afterSwapReturnDelta</code>가 활성화된 훅을 사용하는 적대적 풀에서는 두 델타 모두 비양수가 될 수 있어 <code class="inline-code">amountOut = uint256(음수_int256)</code>이 매우 큰 숫자가 되어 슬리피지 체크를 항상 통과합니다.</p>
+<p>deadline 파라미터도 없습니다. 멤풀에 묶인 트랜잭션이 만료 없이 오래된 가격으로 실행됩니다.</p>
+
+<p><strong>권고 수정 방법:</strong></p>
+
+<pre><code class="code-block">int256 out = params.zeroForOne ? amount1 : amount0;
+require(out > 0, "no output");
+if (uint256(out) &lt; cbData.minAmountOut) revert TooLittleReceived(uint256(out), cbData.minAmountOut);</code></pre>
+
+<p><code class="inline-code">SwapParams</code>에 <code class="inline-code">uint256 deadline</code>을 추가하고 <code class="inline-code">require(block.timestamp &lt;= deadline, "expired")</code>를 적용합니다.</p>
+<p><strong>참고:</strong> SWC-114 (트랜잭션 순서 의존성 / 프론트런)</p>
+
+<hr class="divider">
+
+<h3 id="m-04">[M-04] <code class="inline-code">SwapPriceLoggerHook</code>이 단일 관찰 슬롯만 덮어쓰면서 오라클처럼 카운팅</h3>
+
+<p><strong>심각도:</strong> <span class="badge badge-medium">Medium</span><br>
+<strong>위치:</strong> <code class="inline-code">src/hook/SwapPriceLoggerHook.sol:21-22, 67-72</code></p>
+
+<p><strong>설명:</strong> <code class="inline-code">latestObservation[poolId]</code>는 매 스왑마다 덮어쓰이는 반면 <code class="inline-code">observationCount[poolId]</code>는 증가합니다 — 과거 데이터가 존재하는 것처럼 암시되지만 실제로는 없습니다. 단일 슬롯 설계는 조작 가능한 현물 가격 소스입니다: 스왑 하나로 "오라클" 값을 설정할 수 있습니다. H-02와 결합하면 저장된 값 자체도 잘못됩니다.</p>
+
+<p><strong>권고 수정 방법:</strong> 오프체인 인덱싱이 목적이라면 스토리지를 제거하고 이벤트만 남깁니다(인덱서가 구독 가능). 온체인 오라클 의미론이 필요하면 누적 틱 링 버퍼로 TWAP를 구현합니다. 의도된 소비자를 명확히 문서화합니다.</p>
+
+<hr class="divider">
+
+<h3 id="l-01">[L-01] <code class="inline-code">StrategyLens.getPositions</code>가 잘못된 계정 하나에 전체 배치 revert</h3>
+
+<p><strong>심각도:</strong> <span class="badge badge-low">Low</span><br>
+<strong>위치:</strong> <code class="inline-code">src/lens/StrategyLens.sol:65-83</code></p>
+
+<p><strong>설명:</strong> 루프가 오류 격리 없이 <code class="inline-code">aavePool.getUserAccountData(accounts[i])</code>와 <code class="inline-code">IStrategyAccount(accounts[i]).owner()</code>를 직접 호출합니다. 하나라도 유효한 컨트랙트가 아니거나 Aave가 revert하면 전체 호출이 실패해 인덱서가 모든 결과를 받지 못합니다.</p>
+
+<p><strong>권고 수정 방법:</strong> 계정별 읽기를 <code class="inline-code">try/catch</code>로 감싸고 실패 시 빈 <code class="inline-code">PositionView</code>를 반환합니다.</p>
+
+<hr class="divider">
+
+<h3 id="l-02">[L-02] <code class="inline-code">UserAccount</code>에 오너십 이전 메커니즘 없음</h3>
+
+<p><strong>심각도:</strong> <span class="badge badge-low">Low</span><br>
+<strong>위치:</strong> <code class="inline-code">src/accounts/UserAccount.sol:34</code></p>
+
+<p><strong>설명:</strong> <code class="inline-code">owner</code>는 초기화 시 한 번만 설정되고 변경할 수 없습니다. 오너 키가 분실되거나 탈취되면 <code class="inline-code">onlyOwner</code> 경로를 통한 계정 자금 접근이 영구적으로 불가능해집니다. 2단계 오너십 이전 패턴도 없습니다.</p>
+
+<p><strong>권고 수정 방법:</strong> <code class="inline-code">onlyOwner</code>로 게이팅된 <code class="inline-code">pendingOwner</code> 패턴의 <code class="inline-code">transferOwnership</code>을 추가합니다.</p>
+
+<hr class="divider">
+
+<h3 id="l-03">[L-03] 모든 컨트랙트에 Floating pragma 사용</h3>
+
+<p><strong>심각도:</strong> <span class="badge badge-low">Low</span><br>
+<strong>위치:</strong> 모든 파일 (<code class="inline-code">pragma solidity ^0.8.24;</code>)</p>
+
+<p><strong>설명:</strong> 테스트에 사용된 버전과 다른 패치 버전으로 컴파일이 허용됩니다.</p>
+<p><strong>권고 수정 방법:</strong> 모든 파일에서 특정 버전으로 고정합니다 (<code class="inline-code">pragma solidity 0.8.26;</code>).</p>
+<p><strong>참고:</strong> SWC-103 (Floating Pragma)</p>
+
+<hr class="divider">
+
+<h3 id="l-04">[L-04] <code class="inline-code">HookFactory.deploy</code>가 퍼미션리스; 이벤트에 indexed 필드 없음</h3>
+
+<p><strong>심각도:</strong> <span class="badge badge-low">Low</span><br>
+<strong>위치:</strong> <code class="inline-code">src/hook/HookFactory.sol</code></p>
+
+<p><strong>설명:</strong> 누구나 임의의 솔트로 CREATE2를 통해 <code class="inline-code">SwapPriceLoggerHook</code>을 배포할 수 있습니다. <code class="inline-code">BaseHook</code>의 생성자가 훅 주소 플래그를 검증해 잘못된 배포는 revert되므로 자금 위험은 없습니다. 노출은 주소 공간 그리핑과 <code class="inline-code">hook</code>, <code class="inline-code">salt</code> 필드가 indexed되지 않아 이벤트 필터링이 어려운 것에 국한됩니다.</p>
+
+<p><strong>권고 수정 방법:</strong> 이벤트 필드를 indexed로 변경합니다: <code class="inline-code">event HookDeployed(address indexed hook, bytes32 indexed salt)</code>.</p>
+
+<hr class="divider">
+
+<h3 id="i-01">[I-01] 핵심 라우터 모듈이 스텁; <code class="inline-code">UniswapV4Module</code>에 잘못된 솔리디티 문법</h3>
+
+<p><strong>심각도:</strong> <span class="badge badge-info">Informational</span><br>
+<strong>위치:</strong> <code class="inline-code">src/router/UniswapV4Module.sol:8</code>, <code class="inline-code">src/router/AaveModule.sol:8-10</code>, <code class="inline-code">src/router/StrategyRouter.sol</code></p>
+
+<p><strong>설명:</strong> <code class="inline-code">UniswapV4Module._swap(...)</code>이 <code class="inline-code">...</code>를 파라미터 목록으로 사용하는데 이는 유효한 솔리디티 문법이 아니며 <code class="inline-code">forge build</code>가 실패합니다. <code class="inline-code">AaveModule._supply</code>와 <code class="inline-code">StrategyRouter.execute()</code>는 빈 스텁입니다. Permit2→supply→borrow→swap 전체 흐름이 아직 존재하지 않습니다. <strong>이 모듈들이 구현되면 재감사가 필요합니다.</strong></p>
+
+<hr class="divider">
+
+<h3 id="i-02">[I-02] 테스트 스위트가 전부 빈 placeholder</h3>
+
+<p><strong>심각도:</strong> <span class="badge badge-info">Informational</span><br>
+<strong>위치:</strong> <code class="inline-code">test/StrategyRouter_OpenPosition.t.sol</code>, <code class="inline-code">test/StrategyRouter_ClosePosition.t.sol</code>, <code class="inline-code">test/lens/StrategyLens.t.sol</code>, <code class="inline-code">test/uniswapV4/SwapPriceLoggerHook.t.sol</code></p>
+
+<p><strong>설명:</strong> 4개의 테스트 파일 모두 아무것도 테스트하지 않는 단일 <code class="inline-code">test_placeholder()</code> 함수만 포함합니다. Critical 접근 제어 경로, 슬리피지 체크, 오라클 읽기 중 어느 것도 검증되지 않습니다. 위의 모든 취약점은 기본적인 테스트 스위트로 발견될 수 있었습니다.</p>
+
+<hr class="divider">
+
+<h3 id="i-03">[I-03] <code class="inline-code">TStore</code> 라이브러리가 어디서도 import되지 않음</h3>
+
+<p><strong>심각도:</strong> <span class="badge badge-info">Informational</span><br>
+<strong>위치:</strong> <code class="inline-code">src/utils/TStore.sol</code></p>
+
+<p><strong>설명:</strong> 범위 내 어떤 컨트랙트도 <code class="inline-code">TStore</code>를 import하지 않습니다. 현재로서는 미사용 코드입니다. H-01에서 권장한 <code class="inline-code">nonReentrant</code> 가드를 뒷받침하는 데 활용하면 프로젝트에서 EIP-1153을 안전하게 실제로 사용하게 됩니다.</p>
+
+<hr class="divider">
+
+<h2 id="테스트-커버리지-분석">테스트 커버리지 분석</h2>
+
+<div class="table-wrap">
+<table class="data-table">
+<thead><tr><th>누락된 테스트</th><th>발견되는 취약점</th></tr></thead>
+<tbody>
+<tr><td>비오너 주소에서 <code class="inline-code">setRouter</code> 호출 (revert 기대)</td><td>C-01</td></tr>
+<tr><td>동일 사용자에 대해 <code class="inline-code">createAccount</code> 두 번 호출 (revert 기대)</td><td>C-02, M-01</td></tr>
+<tr><td>비라우터 주소에서 <code class="inline-code">execute</code> 호출 (revert 기대)</td><td>H-01</td></tr>
+<tr><td>악의적 토큰 콜백을 통한 <code class="inline-code">execute</code> 재진입</td><td>H-01</td></tr>
+<tr><td><code class="inline-code">SwapPriceLoggerHook</code> 스왑 후 <code class="inline-code">latestObservation == getSlot0</code> 검증</td><td>H-02</td></tr>
+<tr><td><code class="inline-code">toInt128(type(int128).min - 1)</code> (revert 기대)</td><td>H-03</td></tr>
+<tr><td>USDT 방식 무반환 토큰으로 <code class="inline-code">withdraw</code></td><td>M-02</td></tr>
+<tr><td>목록에 잘못된 계정이 포함된 <code class="inline-code">getPositions</code></td><td>L-01</td></tr>
+</tbody>
+</table>
+</div>
+
+<hr class="divider">
+
+<h2 id="감사-방법론">감사 방법론</h2>
+
+<ol class="content-list">
+<li><strong>수동 코드 리뷰</strong> — 범위 내 모든 파일을 전체 읽음</li>
+<li><strong>의존성 교차 참조</strong> — <code class="inline-code">lib/v4-core</code>와 <code class="inline-code">lib/v4-periphery</code>를 읽어 슬롯 레이아웃, <code class="inline-code">BaseHook</code> 동작, <code class="inline-code">PoolId</code> 유도를 검증</li>
+<li><strong>공격 시나리오 구성</strong> — 각 잠재적 취약점에 대해 콜 그래프를 따라 구체적인 단계별 익스플로잇을 추적</li>
+<li><strong>심각도 분류</strong> — OWASP / 일반 DeFi 감사 기준 적용: Critical = 직접적이고 신뢰할 수 있는 자금 손실; High = 타당한 조건에서 자금 손실 또는 핵심 불변성 손상; Medium = 즉각적 자금 손실 없는 안전성 저하 또는 DoS; Low = 위험이 적은 모범 사례 위반; Informational = 즉각적 위험 없음</li>
+</ol>
+
+<hr class="divider">
+
+<p><em>리포트 끝.</em></p>
+
+    </div>
+  </main>
+</div>
+
+<script>
+const root = document.documentElement;
+const btn = document.getElementById('themeBtn');
+const saved = localStorage.getItem('dashboard-theme');
+if (saved) { root.setAttribute('data-theme', saved); }
+else { if (window.matchMedia('(prefers-color-scheme: light)').matches) root.setAttribute('data-theme', 'light'); }
+function syncBtn() { btn.textContent = root.getAttribute('data-theme') === 'dark' ? '☀️ 라이트' : '🌙 다크'; }
+function toggleTheme() { const n = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'; root.setAttribute('data-theme', n); localStorage.setItem('dashboard-theme', n); syncBtn(); }
+syncBtn();
+const bar = document.getElementById('progressBar');
+window.addEventListener('scroll', () => { const t = document.body.scrollHeight - window.innerHeight; bar.style.width = t > 0 ? (window.scrollY / t * 100) + '%' : '0%'; }, { passive: true });
+const navLinks = document.querySelectorAll('#navList a');
+const headings = document.querySelectorAll('.content-body h1, .content-body h2, .content-body h3');
+function getActive() { const o = 80; let a = null; headings.forEach(h => { if (h.getBoundingClientRect().top <= o) a = h; }); return a; }
+function updateNav() { const a = getActive(); navLinks.forEach(l => { l.classList.remove('active'); if (a && l.getAttribute('href') === '#' + a.id) l.classList.add('active'); }); }
+window.addEventListener('scroll', updateNav, { passive: true }); updateNav();
+navLinks.forEach(a => { a.addEventListener('click', e => { e.preventDefault(); const el = document.getElementById(a.getAttribute('href').slice(1)); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }); });
+</script>
+</body>
+</html>

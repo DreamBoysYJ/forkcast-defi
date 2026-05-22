@@ -1,5 +1,103 @@
 # Backend Review Log
 
+## 2026-05-22 — Wave 1 감사 수정 완료 (C-3, H-1, H-2)
+
+### 작업 목적
+
+백엔드 감사 보고서(`docs/backend-audit.md`) 기반 Wave 1 — Critical/High 중 독립 수정 가능한 3개 이슈 수정.
+
+### 읽은 파일
+
+- `docs/backend-audit.md`
+- `backend/src/main/resources/application.yaml`
+- `backend/src/main/java/io/forkcast/backend/txHint/service/PendingTxService.java`
+- `backend/src/main/java/io/forkcast/backend/txHint/repository/PendingTxRepository.java`
+- `backend/src/main/java/io/forkcast/backend/common/api/GlobalExceptionHandler.java`
+- `backend/src/main/java/io/forkcast/backend/position/repository/StrategyPositionRepository.java`
+- `backend/src/main/java/io/forkcast/backend/position/service/StrategyPositionService.java`
+
+### 변경한 파일
+
+- `backend/src/main/resources/application.yaml` — DB 패스워드 환경변수화 (C-3)
+- `backend/src/main/java/.../txHint/service/PendingTxService.java` — existsByTxHash check 제거 (H-1)
+- `backend/src/main/java/.../txHint/repository/PendingTxRepository.java` — existsByTxHash 메서드 삭제 (H-1)
+- `backend/src/main/java/.../common/api/GlobalExceptionHandler.java` — DataIntegrityViolationException → 409 핸들러 추가 (H-1)
+- `backend/src/test/java/.../txHint/controller/PendingTxControllerTest.java` — 신규 생성 (H-1/H-5)
+- `backend/src/main/java/.../position/repository/StrategyPositionRepository.java` — insertIfAbsent() 추가 (H-2)
+- `backend/src/main/java/.../position/service/StrategyPositionService.java` — existsById+save → insertIfAbsent 전환 (H-2)
+- `docs/learnings/toctou-db-constraint.md` — TOCTOU 학습 메모 (신규)
+- `docs/learnings/secret-management-env.md` — 시크릿 관리 학습 메모 (신규)
+
+### 한 일
+
+**C-3 (DB 패스워드 평문 노출):**
+- `password: 1234` → `password: ${DB_PASSWORD}` (기본값 없음, 미설정 시 기동 실패)
+- `username: forkcast_app` → `username: ${DB_USERNAME:forkcast_app}`
+- PR #14, 이슈 #7 close
+
+**H-1 (PendingTx TOCTOU):**
+- `existsByTxHash` SELECT → INSERT 2-step 제거
+- DB unique constraint violation을 `DataIntegrityViolationException` → 409 `DUPLICATE_TX_HASH` 로 변환
+- Spring Boot 4.x 호환 컨트롤러 테스트 작성 (`@SpringBootTest + webAppContextSetup`)
+- PR #16, 이슈 #11 #10 close
+
+**H-2 (StrategyPosition TOCTOU):**
+- `existsById + save` → `insertIfAbsent()` (`ON CONFLICT (token_id) DO NOTHING`)
+- 이벤트 재처리 시 중복 포지션 원자적으로 차단
+- PR #15, 이슈 #13 close
+
+### 왜 그렇게 했는지
+
+- TOCTOU는 application-level check 대신 DB constraint 위임이 유일한 근본 해결책
+- `ON CONFLICT DO NOTHING`(H-2)은 클라이언트 응답 불필요한 내부 처리에 적합
+- `DataIntegrityViolationException → 409`(H-1)는 API 레이어라 클라이언트에 의미있는 응답 필요
+- 스택 커밋을 PR로 나눌 때 각 PR base를 이전 PR head로 지정해 diff를 최소화
+
+### 남은 문제 (Wave 2)
+
+- C-1: `EventSyncService` null tokenId 방어 코드 미흡
+- C-2: 과거 이벤트 누락 가능성 (re-index 필요 여부 판단)
+- H-3: `Web3jChainClient` 예외 처리 미흡
+- H-4: 블록 범위 상한 (`MAX_BLOCKS_PER_RUN`) 미설정 — Infura 무료 2000블록 제한 대비 1500 권장
+- 위 4개는 `EventSyncService.java`와 `Web3jChainClient.java`를 동시에 수정하므로 단일 브랜치로 진행
+
+---
+
+## 2026-05-19 — 백엔드 취약점 / 향후 문제점 / 발전 포인트 리서치
+
+### 작업 목적
+
+사용자 요청: 백엔드 구현의 잠재 취약점, 향후 발생 가능 문제, 발전 방향을 리서치하고 AI agent가 이해할 수 있게 핵심만 정리. 코드 수정 없음.
+
+### 읽은 파일
+
+- 문서: `backend/README.md`, `docs/backend/{goal,data-model,scheduler-plan,decisions,release-risk-review,data-retention-policy,work-items}.md`, `api-spec.md`, `docs/ops/README.md`
+- 코드: `application.yaml`, `V1__init_schema.sql`, `EventSyncService`, `SnapshotService`, `SnapshotWriteService`, `JobLockService`/`JobLockRepository`, `JobRunService`, `SyncCursorService`, `Web3jChainClient`, `StrategyLensClient`, `EventLogDecoder`, `RawChainEventService`, `StrategyPositionService`, `PositionTimelineService`, `PoolPriceEventService`, `PendingTxService`, `GlobalExceptionHandler`, `WebMvcConfig`, `SchedulerAuthInterceptor`, `SchedulerTokenVerifier`, 각 controller
+
+### 변경한 파일
+
+- `docs/backend/future-risks.md` (신규) — 6개 카테고리(보안/동시성/정합성/운영/테스트/Future) + P0~P3 우선순위표
+- `docs/agent-logs/backend-review.md` (본 항목 추가)
+
+### 한 일
+
+- `release-risk-review.md`(2026-05-08) 이후 미해결 항목 + 새로 발견한 항목 통합
+- 각 항목에 파일:line 위치, 영향, 조치 방향 명시
+- 실제 동작 버그 1건 발견: **S3** — `GlobalExceptionHandler`의 `DUPLICATE_TX_HASH` 매칭 문자열(`"Pending tx already exists:"`)이 `PendingTxService`가 던지는 메시지(`"Pending tx already exists : "`, 공백 2개)와 불일치 → 409가 절대 안 나가고 항상 400으로 떨어짐
+- P0 항목: S1(DB 비밀번호 평문), S3(DUPLICATE_TX_HASH 버그), D4(pre-bootstrap close 처리)
+
+### 왜 그렇게 했는지
+
+- `release-risk-review.md`는 2026-05-08 스냅샷이라 그 이후 추가된 retention 코드, 새로 발견된 버그를 반영하기 위해 별도 파일로 분리
+- 우선순위표를 마지막에 둬서 agent가 어디부터 손댈지 즉시 판단할 수 있게 함
+
+### 남은 문제
+
+- 이 문서는 리서치 결과물이며 코드 수정/이슈 등록은 사용자 결정 후 진행
+- work-items.md §F 미결정(F1/F3/F4)이 D1/D4 같은 정합성 항목과 연결됨 — 결정 우선
+
+---
+
 ## 2026-05-15 — data retention 구현 및 배포
 
 ### 작업 목적

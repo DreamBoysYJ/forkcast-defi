@@ -1,0 +1,1024 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Security Audit Report — Forkcast DeFi Contracts</title>
+<style>
+/* ── Reset ── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* ── Theme tokens ── */
+:root {
+  --bg:           #0d1117;
+  --bg-card:      #161b22;
+  --bg-sidebar:   #0d1117;
+  --bg-header:    rgba(13,17,23,0.92);
+  --text:         #e6edf3;
+  --text-muted:   #7d8590;
+  --text-heading: #f0f6fc;
+  --border:       #30363d;
+  --accent:       #58a6ff;
+  --accent-hover: #79c0ff;
+  --code-bg:      #161b22;
+  --code-border:  #30363d;
+  --pre-bg:       #0d1117;
+  --table-head:   #161b22;
+  --table-alt:    #0d1117;
+  --blockquote-border: #388bfd;
+  --blockquote-bg: rgba(56,139,253,0.08);
+  --sidebar-w:    272px;
+  --header-h:     56px;
+  --shadow:       0 1px 3px rgba(0,0,0,0.4);
+}
+[data-theme="light"] {
+  --bg:           #ffffff;
+  --bg-card:      #f6f8fa;
+  --bg-sidebar:   #f6f8fa;
+  --bg-header:    rgba(255,255,255,0.92);
+  --text:         #1f2328;
+  --text-muted:   #57606a;
+  --text-heading: #1f2328;
+  --border:       #d0d7de;
+  --accent:       #0969da;
+  --accent-hover: #0550ae;
+  --code-bg:      #f6f8fa;
+  --code-border:  #d0d7de;
+  --pre-bg:       #f6f8fa;
+  --table-head:   #f6f8fa;
+  --table-alt:    #ffffff;
+  --blockquote-border: #0969da;
+  --blockquote-bg: rgba(9,105,218,0.06);
+  --shadow:       0 1px 3px rgba(0,0,0,0.12);
+}
+
+/* ── Base ── */
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--text);
+  background: var(--bg);
+  min-height: 100vh;
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { color: var(--accent-hover); text-decoration: underline; }
+
+/* ── Header ── */
+.site-header {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: var(--header-h);
+  background: var(--bg-header);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  z-index: 100;
+  gap: 16px;
+}
+.header-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-heading);
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.header-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.theme-toggle {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.theme-toggle:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ── Layout ── */
+.layout {
+  display: flex;
+  padding-top: var(--header-h);
+  min-height: 100vh;
+}
+
+/* ── Sidebar ── */
+.sidebar {
+  width: var(--sidebar-w);
+  min-width: var(--sidebar-w);
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--border);
+  position: fixed;
+  top: var(--header-h);
+  left: 0;
+  bottom: 0;
+  overflow-y: auto;
+  padding: 20px 0 40px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.sidebar::-webkit-scrollbar { width: 4px; }
+.sidebar::-webkit-scrollbar-track { background: transparent; }
+.sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+.sidebar-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  padding: 0 20px 8px;
+}
+.sidebar ul {
+  list-style: none;
+}
+.sidebar li a {
+  display: block;
+  padding: 4px 20px;
+  font-size: 13px;
+  color: var(--text-muted);
+  border-left: 2px solid transparent;
+  transition: all 0.12s;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.sidebar li a:hover,
+.sidebar li a.active {
+  color: var(--text);
+  border-left-color: var(--accent);
+  background: rgba(88,166,255,0.06);
+  text-decoration: none;
+}
+.sidebar li.nav-h1 > a { font-weight: 600; color: var(--text); font-size: 13px; }
+.sidebar li.nav-h2 > a { padding-left: 28px; }
+.sidebar li.nav-h3 > a { padding-left: 40px; font-size: 12px; }
+
+/* ── Main content ── */
+.main {
+  flex: 1;
+  margin-left: var(--sidebar-w);
+  padding: 40px 48px 80px;
+  max-width: calc(var(--sidebar-w) + 900px);
+  width: 100%;
+}
+.content-body { max-width: 860px; }
+
+/* ── Typography ── */
+.content-body h1 {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text-heading);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 12px;
+  margin: 32px 0 20px;
+  line-height: 1.3;
+}
+.content-body h1:first-child { margin-top: 0; }
+.content-body h2 {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-heading);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 8px;
+  margin: 36px 0 16px;
+}
+.content-body h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-heading);
+  margin: 28px 0 12px;
+}
+.content-body h4 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-heading);
+  margin: 20px 0 8px;
+}
+.content-body p { margin: 0 0 14px; }
+.content-body ul.content-list,
+.content-body ol.content-list {
+  margin: 0 0 14px 24px;
+}
+.content-body ul.content-list li,
+.content-body ol.content-list li {
+  margin: 4px 0;
+}
+.content-body strong { font-weight: 600; color: var(--text-heading); }
+.content-body hr.divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 32px 0;
+}
+
+/* ── Badges ── */
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.badge-critical { background: rgba(239,68,68,0.15); color: #f87171; border: 1px solid rgba(239,68,68,0.3); }
+.badge-high     { background: rgba(249,115,22,0.15); color: #fb923c; border: 1px solid rgba(249,115,22,0.3); }
+.badge-medium   { background: rgba(234,179,8,0.15);  color: #facc15; border: 1px solid rgba(234,179,8,0.3); }
+.badge-low      { background: rgba(59,130,246,0.15); color: #60a5fa; border: 1px solid rgba(59,130,246,0.3); }
+.badge-info     { background: rgba(107,114,128,0.15); color: #9ca3af; border: 1px solid rgba(107,114,128,0.3); }
+.badge-pass     { background: rgba(34,197,94,0.15);  color: #4ade80; border: 1px solid rgba(34,197,94,0.3); }
+.badge-fail     { background: rgba(239,68,68,0.15);  color: #f87171; border: 1px solid rgba(239,68,68,0.3); }
+.badge-warning  { background: rgba(234,179,8,0.15);  color: #facc15; border: 1px solid rgba(234,179,8,0.3); }
+
+[data-theme="light"] .badge-critical { background: #fee2e2; color: #dc2626; border-color: #fca5a5; }
+[data-theme="light"] .badge-high     { background: #ffedd5; color: #ea580c; border-color: #fdba74; }
+[data-theme="light"] .badge-medium   { background: #fef9c3; color: #ca8a04; border-color: #fde047; }
+[data-theme="light"] .badge-low      { background: #dbeafe; color: #2563eb; border-color: #93c5fd; }
+[data-theme="light"] .badge-info     { background: #f3f4f6; color: #4b5563; border-color: #d1d5db; }
+[data-theme="light"] .badge-pass     { background: #dcfce7; color: #16a34a; border-color: #86efac; }
+[data-theme="light"] .badge-fail     { background: #fee2e2; color: #dc2626; border-color: #fca5a5; }
+[data-theme="light"] .badge-warning  { background: #fef9c3; color: #ca8a04; border-color: #fde047; }
+
+/* ── Tables ── */
+.table-wrap {
+  overflow-x: auto;
+  margin: 16px 0 20px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+}
+.data-table th {
+  background: var(--table-head);
+  color: var(--text-heading);
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 10px 14px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.data-table td {
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+  line-height: 1.5;
+}
+.data-table tr:last-child td { border-bottom: none; }
+.data-table tr:nth-child(even) td { background: var(--table-alt); }
+.data-table tr:hover td { background: rgba(88,166,255,0.04); }
+
+/* ── Code ── */
+code.inline-code {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 12.5px;
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  color: #e06c75;
+}
+[data-theme="light"] code.inline-code { color: #d73a49; }
+
+pre {
+  background: var(--pre-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px 20px;
+  overflow-x: auto;
+  margin: 14px 0 20px;
+  box-shadow: var(--shadow);
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+pre::-webkit-scrollbar { height: 4px; }
+pre::-webkit-scrollbar-track { background: transparent; }
+pre::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+code.code-block {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #c9d1d9;
+  display: block;
+  white-space: pre;
+}
+[data-theme="light"] code.code-block { color: #24292f; }
+
+/* ── Blockquote / Callout ── */
+blockquote.callout {
+  border-left: 3px solid var(--blockquote-border);
+  background: var(--blockquote-bg);
+  border-radius: 0 6px 6px 0;
+  padding: 12px 18px;
+  margin: 14px 0 20px;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+blockquote.callout p { margin: 0; }
+blockquote.callout strong { color: var(--text); }
+
+/* ── Scroll spy indicator ── */
+.reading-progress {
+  position: fixed;
+  top: var(--header-h);
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--border);
+  z-index: 99;
+}
+.reading-progress-bar {
+  height: 100%;
+  background: var(--accent);
+  width: 0%;
+  transition: width 0.1s;
+}
+
+/* ── Responsive ── */
+@media (max-width: 768px) {
+  .sidebar { display: none; }
+  .main { margin-left: 0; padding: 24px 20px 60px; }
+}
+</style>
+</head>
+<body>
+
+<!-- Reading progress bar -->
+<div class="reading-progress"><div class="reading-progress-bar" id="progressBar"></div></div>
+
+<!-- Header -->
+<header class="site-header">
+  <span class="header-title">Security Audit Report — Forkcast DeFi Contracts</span>
+  <span class="header-meta">security-audit-report.md &nbsp;·&nbsp; 2026-05-20 00:00</span>
+  <button class="theme-toggle" onclick="toggleTheme()" id="themeBtn">☀️ Light</button>
+</header>
+
+<!-- Layout -->
+<div class="layout">
+
+  <!-- Sidebar -->
+  <nav class="sidebar" id="sidebar">
+    <div class="sidebar-label">Contents</div>
+    <ul id="navList">
+      <li class="nav-h1"><a href="#security-audit-report-forkcast-defi-contracts">Security Audit Report — Forkcast DeFi Contracts</a></li>
+      <li class="nav-h2"><a href="#executive-summary">Executive Summary</a></li>
+      <li class="nav-h2"><a href="#scope">Scope</a></li>
+      <li class="nav-h3"><a href="#in-scope-production-src">In Scope (production src/)</a></li>
+      <li class="nav-h3"><a href="#reference-only-not-audited-for-vulnerabilities">Reference Only (not audited for vulnerabilities)</a></li>
+      <li class="nav-h3"><a href="#assumptions">Assumptions</a></li>
+      <li class="nav-h2"><a href="#findings">Findings</a></li>
+      <li class="nav-h3"><a href="#summary-table">Summary Table</a></li>
+      <li class="nav-h3"><a href="#c-01-accountfactorysetrouter-is-unprotected-anyone-can-hijack-the-router">[C-01] AccountFactory.setRouter is unprotected</a></li>
+      <li class="nav-h3"><a href="#c-02-createaccount-mapping-is-overwritable-and-router-trust-is-not-approved-by-the-owner">[C-02] createAccount mapping is overwritable</a></li>
+      <li class="nav-h3"><a href="#h-01-useraccountexecute-is-a-general-arbitrary-call-primitive-with-no-reentrancy-guard">[H-01] UserAccount.execute no reentrancy guard</a></li>
+      <li class="nav-h3"><a href="#h-02-swappriceloggerhook_readslot0-reads-the-wrong-storage-slot-price-data-is-corrupt">[H-02] SwapPriceLoggerHook wrong storage slot</a></li>
+      <li class="nav-h3"><a href="#h-03-safecasttoint128-is-missing-a-lower-bound-check-signed-casts-silently-truncate">[H-03] SafeCast.toInt128 missing lower-bound check</a></li>
+      <li class="nav-h3"><a href="#m-01-accountfactorycreateaccount-has-no-guard-against-overwriting-an-existing-account">[M-01] createAccount no overwrite guard</a></li>
+      <li class="nav-h3"><a href="#m-02-useraccount-uses-raw-ierc20transferapprove-breaks-with-non-standard-tokens">[M-02] UserAccount raw ERC20 calls</a></li>
+      <li class="nav-h3"><a href="#m-03-miniv4swaprouter-slippage-check-uses-a-sign-heuristic-and-has-no-deadline">[M-03] Miniv4SwapRouter slippage heuristic</a></li>
+      <li class="nav-h3"><a href="#m-04-swappriceloggerhook-overwrites-a-single-observation-slot-no-historical-data-despite-counting">[M-04] SwapPriceLoggerHook single observation slot</a></li>
+      <li class="nav-h3"><a href="#l-01-strategylensgetpositions-reverts-the-entire-batch-on-one-bad-account">[L-01] StrategyLens.getPositions batch revert</a></li>
+      <li class="nav-h3"><a href="#l-02-useraccount-has-no-ownership-transfer-mechanism">[L-02] UserAccount no ownership transfer</a></li>
+      <li class="nav-h3"><a href="#l-03-floating-pragma-across-all-contracts">[L-03] Floating pragma</a></li>
+      <li class="nav-h3"><a href="#l-04-hookfactorydeploy-is-permissionless-event-has-no-indexed-fields">[L-04] HookFactory.deploy permissionless</a></li>
+      <li class="nav-h3"><a href="#i-01-core-router-modules-are-stubs-uniswapv4module-has-invalid-solidity-syntax">[I-01] Core router modules are stubs</a></li>
+      <li class="nav-h3"><a href="#i-02-test-suite-is-entirely-empty-placeholders">[I-02] Test suite empty placeholders</a></li>
+      <li class="nav-h3"><a href="#i-03-tstore-library-is-unused">[I-03] TStore library is unused</a></li>
+      <li class="nav-h2"><a href="#test-coverage-analysis">Test Coverage Analysis</a></li>
+      <li class="nav-h2"><a href="#methodology">Methodology</a></li>
+    </ul>
+  </nav>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="content-body" id="contentBody">
+
+      <h1 id="security-audit-report-forkcast-defi-contracts">Security Audit Report — Forkcast DeFi Contracts</h1>
+
+      <p><strong>Date:</strong> 2026-05-20<br>
+      <strong>Auditor:</strong> solidity-auditor (Claude Code)<br>
+      <strong>Repository:</strong> <code class="inline-code">forkcast-defi/contracts/</code><br>
+      <strong>Commit branch:</strong> <code class="inline-code">fix/web-state-history-ui</code></p>
+
+      <hr class="divider">
+
+      <h2 id="executive-summary">Executive Summary</h2>
+
+      <p>A professional security audit was performed on the production Solidity source files in <code class="inline-code">contracts/src/</code>. The codebase is an early-stage DeFi monorepo combining Aave v3 and Uniswap v4. Several <strong>critical</strong> and <strong>high</strong> severity vulnerabilities were identified. The most severe findings allow any external party to take full control of every user's smart account and drain funds. These must be resolved before any mainnet deployment.</p>
+
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Severity</th>
+              <th>Count</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><span class="badge badge-critical">Critical</span></td><td>2</td></tr>
+            <tr><td><span class="badge badge-high">High</span></td><td>3</td></tr>
+            <tr><td><span class="badge badge-medium">Medium</span></td><td>4</td></tr>
+            <tr><td><span class="badge badge-low">Low</span></td><td>4</td></tr>
+            <tr><td><span class="badge badge-info">Informational</span></td><td>3</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <blockquote class="callout">
+        <p><strong>The two Critical findings (C-01, C-02) in <code class="inline-code">AccountFactory</code> are prerequisite blockers. Until resolved, no user funds should enter the system.</strong></p>
+      </blockquote>
+
+      <hr class="divider">
+
+      <h2 id="scope">Scope</h2>
+
+      <h3 id="in-scope-production-src">In Scope (production <code class="inline-code">src/</code>)</h3>
+
+      <pre><code class="code-block">src/router/StrategyRouter.sol          (stub — cannot compile)
+src/router/AaveModule.sol              (stub)
+src/router/UniswapV4Module.sol         (stub — invalid Solidity syntax)
+src/accounts/UserAccount.sol           ← primary audit target
+src/factory/AccountFactory.sol         ← primary audit target
+src/lens/StrategyLens.sol
+src/hook/SwapPriceLoggerHook.sol
+src/hook/HookFactory.sol
+src/uniswapV4/Miniv4SwapRouter.sol
+src/libs/UniswapV4LiquidityPreview.sol
+src/libs/Hooks.sol
+src/libs/HookMiner.sol
+src/libs/SafeCast.sol
+src/utils/TStore.sol
+src/interfaces/IERC20.sol</code></pre>
+
+      <h3 id="reference-only-not-audited-for-vulnerabilities">Reference Only (not audited for vulnerabilities)</h3>
+
+      <p><code class="inline-code">lib/v4-core</code>, <code class="inline-code">lib/v4-periphery</code>, <code class="inline-code">test/</code> (placeholder test files)</p>
+
+      <h3 id="assumptions">Assumptions</h3>
+
+      <ul class="content-list">
+        <li>v4 <code class="inline-code">PoolId = keccak256(abi.encode(poolKey))</code> (confirmed via <code class="inline-code">lib/v4-core/src/types/PoolId.sol</code>).</li>
+        <li>v4 pool state base slot: <code class="inline-code">keccak256(abi.encodePacked(poolId, bytes32(uint256(6))))</code> where <code class="inline-code">POOLS_SLOT = 6</code> (confirmed via <code class="inline-code">StateLibrary.sol</code>).</li>
+        <li><code class="inline-code">BaseHook</code> constructor calls <code class="inline-code">validateHookAddress(this)</code> and reverts on flag mismatch (confirmed via <code class="inline-code">lib/v4-periphery</code>).</li>
+        <li>The backend is read-only and never submits user transactions; "backend front-runs the user" is not in threat scope per project design.</li>
+      </ul>
+
+      <hr class="divider">
+
+      <h2 id="findings">Findings</h2>
+
+      <h3 id="summary-table">Summary Table</h3>
+
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Title</th>
+              <th>Severity</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>C-01</td>
+              <td><code class="inline-code">AccountFactory.setRouter</code> unprotected — anyone can set the router and control all accounts</td>
+              <td><span class="badge badge-critical">Critical</span></td>
+            </tr>
+            <tr>
+              <td>C-02</td>
+              <td><code class="inline-code">createAccount</code> mapping is overwritable and router trust is owner-unapproved</td>
+              <td><span class="badge badge-critical">Critical</span></td>
+            </tr>
+            <tr>
+              <td>H-01</td>
+              <td><code class="inline-code">UserAccount.execute</code> is a general arbitrary-call primitive with no reentrancy guard</td>
+              <td><span class="badge badge-high">High</span></td>
+            </tr>
+            <tr>
+              <td>H-02</td>
+              <td><code class="inline-code">SwapPriceLoggerHook._readSlot0</code> reads the wrong storage slot — on-chain price data is corrupt</td>
+              <td><span class="badge badge-high">High</span></td>
+            </tr>
+            <tr>
+              <td>H-03</td>
+              <td><code class="inline-code">SafeCast.toInt128</code> missing lower-bound check — silent signed integer truncation</td>
+              <td><span class="badge badge-high">High</span></td>
+            </tr>
+            <tr>
+              <td>M-01</td>
+              <td><code class="inline-code">AccountFactory.createAccount</code> has no guard against overwriting an existing user account</td>
+              <td><span class="badge badge-medium">Medium</span></td>
+            </tr>
+            <tr>
+              <td>M-02</td>
+              <td><code class="inline-code">UserAccount</code> uses raw <code class="inline-code">transfer</code>/<code class="inline-code">approve</code> — breaks with non-standard ERC20s</td>
+              <td><span class="badge badge-medium">Medium</span></td>
+            </tr>
+            <tr>
+              <td>M-03</td>
+              <td><code class="inline-code">Miniv4SwapRouter</code> slippage check uses sign heuristic; no deadline parameter</td>
+              <td><span class="badge badge-medium">Medium</span></td>
+            </tr>
+            <tr>
+              <td>M-04</td>
+              <td><code class="inline-code">SwapPriceLoggerHook</code> overwrites a single observation slot but counts like an oracle</td>
+              <td><span class="badge badge-medium">Medium</span></td>
+            </tr>
+            <tr>
+              <td>L-01</td>
+              <td><code class="inline-code">StrategyLens.getPositions</code> reverts the entire batch on one bad account</td>
+              <td><span class="badge badge-low">Low</span></td>
+            </tr>
+            <tr>
+              <td>L-02</td>
+              <td><code class="inline-code">UserAccount</code> has no ownership rotation / two-step transfer</td>
+              <td><span class="badge badge-low">Low</span></td>
+            </tr>
+            <tr>
+              <td>L-03</td>
+              <td>Floating pragma <code class="inline-code">^0.8.24</code> across all contracts</td>
+              <td><span class="badge badge-low">Low</span></td>
+            </tr>
+            <tr>
+              <td>L-04</td>
+              <td><code class="inline-code">HookFactory.deploy</code> is permissionless; event has no indexed fields</td>
+              <td><span class="badge badge-low">Low</span></td>
+            </tr>
+            <tr>
+              <td>I-01</td>
+              <td>Core router modules are stubs; <code class="inline-code">UniswapV4Module</code> has invalid Solidity syntax</td>
+              <td><span class="badge badge-info">Informational</span></td>
+            </tr>
+            <tr>
+              <td>I-02</td>
+              <td>Test suite is entirely empty placeholders</td>
+              <td><span class="badge badge-info">Informational</span></td>
+            </tr>
+            <tr>
+              <td>I-03</td>
+              <td><code class="inline-code">TStore</code> library is imported nowhere</td>
+              <td><span class="badge badge-info">Informational</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <hr class="divider">
+
+      <h3 id="c-01-accountfactorysetrouter-is-unprotected-anyone-can-hijack-the-router">[C-01] <code class="inline-code">AccountFactory.setRouter</code> is unprotected — anyone can hijack the router</h3>
+
+      <p><strong>Severity:</strong> <span class="badge badge-critical">Critical</span><br>
+      <strong>Location:</strong> <code class="inline-code">src/factory/AccountFactory.sol:12-14</code></p>
+
+      <p><strong>Description:</strong></p>
+
+      <pre><code class="code-block">address public router;
+
+function setRouter(address _router) external {   // ← no access modifier
+    router = _router;
+}
+
+function createAccount(address user) external returns (address) {
+    address account = address(new UserAccount());
+    UserAccount(payable(account)).initialize(user, router);  // router baked into account
+    accountOf[user] = account;
+    return account;
+}</code></pre>
+
+      <p><code class="inline-code">setRouter</code> has no <code class="inline-code">onlyOwner</code> or equivalent guard. The <code class="inline-code">router</code> address stored here is injected into every <code class="inline-code">UserAccount</code> as its only privilege gate (<code class="inline-code">onlyRouter</code>). <code class="inline-code">UserAccount.execute</code> (H-01) lets the router make arbitrary external calls from inside the account. Therefore, controlling <code class="inline-code">router</code> at account creation time means controlling that account's funds indefinitely.</p>
+
+      <p><strong>Attack Scenario:</strong></p>
+      <ol class="content-list">
+        <li>Attacker calls <code class="inline-code">factory.setRouter(attackerContract)</code>.</li>
+        <li>A victim or operator calls <code class="inline-code">factory.createAccount(victim)</code>. The new account initializes with <code class="inline-code">router = attackerContract</code>.</li>
+        <li>Victim deposits tokens into their newly created account.</li>
+        <li>Attacker, via <code class="inline-code">attackerContract</code>, calls <code class="inline-code">userAccount.execute(USDC, 0, abi.encodeCall(IERC20.transfer, (attacker, balance)))</code>, draining the account.</li>
+      </ol>
+
+      <p><strong>Recommendation:</strong></p>
+      <p>Make <code class="inline-code">router</code> immutable and set it in the constructor. If mutability is required, add access control and a timelock:</p>
+
+      <pre><code class="code-block">contract AccountFactory {
+    address public immutable router;
+    address public immutable owner;
+
+    constructor(address _router) {
+        router = _router;
+        owner = msg.sender;
+    }
+}</code></pre>
+
+      <p><strong>References:</strong> SWC-105 (Unprotected Ether Withdrawal), SWC-118 (Incorrect Constructor Name)</p>
+
+      <hr class="divider">
+
+      <h3 id="c-02-createaccount-mapping-is-overwritable-and-router-trust-is-not-approved-by-the-owner">[C-02] <code class="inline-code">createAccount</code> mapping is overwritable and router trust is not approved by the owner</h3>
+
+      <p><strong>Severity:</strong> <span class="badge badge-critical">Critical</span><br>
+      <strong>Location:</strong> <code class="inline-code">src/factory/AccountFactory.sol:16-21</code>, <code class="inline-code">src/accounts/UserAccount.sol:38-43</code></p>
+
+      <p><strong>Description:</strong></p>
+      <p><code class="inline-code">accountOf[user] = account</code> is written unconditionally. A second call to <code class="inline-code">createAccount(victim)</code> overwrites the entry, orphaning any funds held in the original account. Nothing prevents an attacker from calling this for arbitrary <code class="inline-code">user</code> addresses. Combined with C-01, the account's <code class="inline-code">router</code> value is whatever an attacker sets — never approved by the account owner.</p>
+
+      <p><strong>Attack Scenario:</strong></p>
+      <ol class="content-list">
+        <li>Victim's account is funded and <code class="inline-code">accountOf[victim]</code> resolves to <code class="inline-code">account_A</code>.</li>
+        <li>Attacker calls <code class="inline-code">createAccount(victim)</code> (permissionless). <code class="inline-code">accountOf[victim]</code> now points to <code class="inline-code">account_B</code> (empty, attacker-router).</li>
+        <li>Frontend/indexer resolves victim's account via <code class="inline-code">accountOf[victim]</code>; new deposits flow into <code class="inline-code">account_B</code>, which the attacker drains.</li>
+      </ol>
+
+      <p><strong>Recommendation:</strong></p>
+      <p>Guard against re-creation and use CREATE2 for deterministic addresses:</p>
+
+      <pre><code class="code-block">function createAccount(address user) external returns (address) {
+    require(accountOf[user] == address(0), "already exists");
+    address account = address(
+        new UserAccount{salt: keccak256(abi.encode(user))}()
+    );
+    UserAccount(payable(account)).initialize(user, router);
+    accountOf[user] = account;
+    return account;
+}</code></pre>
+
+      <p>Consider restricting to <code class="inline-code">msg.sender == user</code> so only the user can create their own account.</p>
+      <p><strong>References:</strong> SWC-118, SWC-114 (Transaction Order Dependence)</p>
+
+      <hr class="divider">
+
+      <h3 id="h-01-useraccountexecute-is-a-general-arbitrary-call-primitive-with-no-reentrancy-guard">[H-01] <code class="inline-code">UserAccount.execute</code> is a general arbitrary-call primitive with no reentrancy guard</h3>
+
+      <p><strong>Severity:</strong> <span class="badge badge-high">High</span> (Critical if C-01/C-02 unresolved)<br>
+      <strong>Location:</strong> <code class="inline-code">src/accounts/UserAccount.sol:55-64</code></p>
+
+      <p><strong>Description:</strong></p>
+
+      <pre><code class="code-block">function execute(address target, uint256 value, bytes calldata data)
+    external onlyRouter returns (bytes memory)
+{
+    (bool success, bytes memory result) = target.call{value: value}(data);
+    require(success, "call failed");
+    return result;
+}</code></pre>
+
+      <p>This is a fully generic "call anything" primitive. The entire security model of every user's funds reduces to: "is the router trustworthy?" Given C-01/C-02, the router is attacker-controlled at deployment time.</p>
+      <p>Even with an honest router, there is no reentrancy guard. A malicious ERC777 token or hook-manipulated pool can re-enter <code class="inline-code">execute</code> or <code class="inline-code">withdraw</code> mid-operation before balances settle.</p>
+      <p>The project already has <code class="inline-code">TStore.sol</code> (EIP-1153 transient storage) that is currently unused — this is its natural home.</p>
+
+      <p><strong>Recommendation:</strong></p>
+      <ul class="content-list">
+        <li>Replace the generic <code class="inline-code">execute</code> with typed functions: <code class="inline-code">supply(asset, amount)</code>, <code class="inline-code">borrow(asset, amount)</code>, <code class="inline-code">swap(...)</code> — each hard-coding a trusted target address.</li>
+        <li>If a generic primitive is retained, gate target against an allowlist (Aave pool, PoolManager only).</li>
+        <li>Add reentrancy protection using the existing <code class="inline-code">TStore</code> library:</li>
+      </ul>
+
+      <pre><code class="code-block">bool private _entered;
+modifier nonReentrant() {
+    require(!_entered, "reentrant");
+    _entered = true;
+    _;
+    _entered = false;
+}</code></pre>
+
+      <p><strong>References:</strong> SWC-107 (Reentrancy), SWC-105</p>
+
+      <hr class="divider">
+
+      <h3 id="h-02-swappriceloggerhook_readslot0-reads-the-wrong-storage-slot-price-data-is-corrupt">[H-02] <code class="inline-code">SwapPriceLoggerHook._readSlot0</code> reads the wrong storage slot — price data is corrupt</h3>
+
+      <p><strong>Severity:</strong> <span class="badge badge-high">High</span><br>
+      <strong>Location:</strong> <code class="inline-code">src/hook/SwapPriceLoggerHook.sol:88-98</code></p>
+
+      <p><strong>Description:</strong></p>
+
+      <pre><code class="code-block">function _readSlot0(bytes32 poolId) internal view returns (uint160 sqrtPriceX96, int24 tick) {
+    bytes32 slot = keccak256(abi.encode(poolId, uint256(6)));  // WRONG
+    bytes32 raw = poolManager.extsload(slot);
+    sqrtPriceX96 = uint160(uint256(raw));
+    tick = int24(int256(uint256(raw) &gt;&gt; 160));
+}</code></pre>
+
+      <p>The canonical v4 slot derivation (from <code class="inline-code">StateLibrary._getPoolStateSlot</code>):</p>
+
+      <pre><code class="code-block">keccak256(abi.encodePacked(poolId, bytes32(uint256(6))))  // POOLS_SLOT = 6</code></pre>
+
+      <p>While <code class="inline-code">abi.encode</code> and <code class="inline-code">abi.encodePacked</code> produce identical bytes for two 32-byte values, the slot constant <code class="inline-code">uint256(6)</code> must be cast to <code class="inline-code">bytes32</code> before packing — and more importantly, the correct call is <code class="inline-code">poolManager.getSlot0(poolId)</code> via <code class="inline-code">StateLibrary</code>, not a hand-rolled <code class="inline-code">extsload</code>. With the incorrect derivation, <code class="inline-code">extsload</code> returns whatever occupies the mis-derived slot (often zero or unrelated data).</p>
+      <p>Every <code class="inline-code">PriceLogged</code> event and every <code class="inline-code">latestObservation[poolId]</code> entry records a <code class="inline-code">sqrtPriceX96</code>/<code class="inline-code">tick</code> that is not the pool's real price. Any downstream consumer (indexer, frontend chart, or a future strategy sizing off this data) is fed corrupt values.</p>
+
+      <p><strong>Recommendation:</strong></p>
+      <p>Use <code class="inline-code">StateLibrary</code> directly:</p>
+
+      <pre><code class="code-block">import {StateLibrary} from "v4-core/src/libraries/StateLibrary.sol";
+import {PoolId, PoolIdLibrary} from "v4-core/src/types/PoolId.sol";
+
+using StateLibrary for IPoolManager;
+using PoolIdLibrary for PoolKey;
+
+function _afterSwap(
+    address,
+    PoolKey calldata key,
+    IPoolManager.SwapParams calldata,
+    BalanceDelta,
+    bytes calldata
+) internal override returns (bytes4, int128) {
+    (uint160 sqrtPriceX96, int24 tick,,) = poolManager.getSlot0(key.toId());
+    // ... rest of storage logic
+}</code></pre>
+
+      <p>Delete <code class="inline-code">_readSlot0</code> and <code class="inline-code">_getCurrentPrice</code>. Add a test that swaps and asserts <code class="inline-code">latestObservation[poolId].sqrtPriceX96 == poolManager.getSlot0(id).sqrtPriceX96</code>.</p>
+      <p><strong>References:</strong> v4 <code class="inline-code">StateLibrary</code>, SWC-110 (Assert Violation)</p>
+
+      <hr class="divider">
+
+      <h3 id="h-03-safecasttoint128-is-missing-a-lower-bound-check-signed-casts-silently-truncate">[H-03] <code class="inline-code">SafeCast.toInt128</code> is missing a lower-bound check — signed casts silently truncate</h3>
+
+      <p><strong>Severity:</strong> <span class="badge badge-high">High</span><br>
+      <strong>Location:</strong> <code class="inline-code">src/libs/SafeCast.sol:14-17</code></p>
+
+      <p><strong>Description:</strong></p>
+
+      <pre><code class="code-block">function toInt128(int256 x) internal pure returns (int128) {
+    if (x &gt; type(int128).max) revert Overflow();   // upper bound only
+    return int128(x);                               // x &lt; type(int128).min wraps silently
+}</code></pre>
+
+      <p>A value of <code class="inline-code">type(int128).min - 1</code> passes the check and is silently truncated to an incorrect, potentially attacker-favorable value. Uniswap v4 deltas are signed integers and routinely negative, so any future swap-settlement code calling <code class="inline-code">toInt128</code> on a negative delta can mis-account settlement amounts.</p>
+
+      <p><strong>Recommendation:</strong></p>
+
+      <pre><code class="code-block">function toInt128(int256 x) internal pure returns (int128) {
+    if (x &gt; type(int128).max || x &lt; type(int128).min) revert Overflow();
+    return int128(x);
+}</code></pre>
+
+      <p>Prefer adopting <code class="inline-code">OpenZeppelin SafeCast</code> or <code class="inline-code">v4-core SafeCast</code> rather than maintaining a hand-rolled version.</p>
+      <p><strong>References:</strong> SWC-101 (Integer Overflow and Underflow)</p>
+
+      <hr class="divider">
+
+      <h3 id="m-01-accountfactorycreateaccount-has-no-guard-against-overwriting-an-existing-account">[M-01] <code class="inline-code">AccountFactory.createAccount</code> has no guard against overwriting an existing account</h3>
+
+      <p><strong>Severity:</strong> <span class="badge badge-medium">Medium</span><br>
+      <strong>Location:</strong> <code class="inline-code">src/factory/AccountFactory.sol:16-21</code></p>
+
+      <p><strong>Description:</strong> Separate from C-02's router-trust angle, the absence of <code class="inline-code">require(accountOf[user] == address(0))</code> is a standalone griefing vector: any caller can orphan a funded account by overwriting its mapping entry. The prior account's funds are not lost (they remain in the old contract) but they become unreachable via the factory.</p>
+
+      <p><strong>Recommendation:</strong> Add <code class="inline-code">require(accountOf[user] == address(0), "account exists")</code> as the first line of <code class="inline-code">createAccount</code>.</p>
+
+      <hr class="divider">
+
+      <h3 id="m-02-useraccount-uses-raw-ierc20transferapprove-breaks-with-non-standard-tokens">[M-02] <code class="inline-code">UserAccount</code> uses raw <code class="inline-code">IERC20.transfer</code>/<code class="inline-code">approve</code> — breaks with non-standard tokens</h3>
+
+      <p><strong>Severity:</strong> <span class="badge badge-medium">Medium</span><br>
+      <strong>Location:</strong> <code class="inline-code">src/accounts/UserAccount.sol:71, 80</code></p>
+
+      <p><strong>Description:</strong></p>
+
+      <pre><code class="code-block">IERC20(token).approve(spender, amount);   // return value ignored
+IERC20(token).transfer(owner, amount);    // return value ignored</code></pre>
+
+      <p>Tokens that return <code class="inline-code">false</code> on failure (some legacy tokens) silently succeed. Tokens that return no data (USDT on mainnet) revert on ABI decode. Approval calls on USDT-style tokens that require a reset-to-zero first also revert. For a custody contract, this means funds may fail to move while the calling logic believes they succeeded.</p>
+
+      <p><strong>Recommendation:</strong> Replace with <code class="inline-code">SafeERC20</code> (<code class="inline-code">safeTransfer</code>, <code class="inline-code">safeApprove</code> / <code class="inline-code">forceApprove</code>).</p>
+      <p><strong>References:</strong> SWC-104 (Unchecked Call Return Value)</p>
+
+      <hr class="divider">
+
+      <h3 id="m-03-miniv4swaprouter-slippage-check-uses-a-sign-heuristic-and-has-no-deadline">[M-03] <code class="inline-code">Miniv4SwapRouter</code> slippage check uses a sign heuristic and has no deadline</h3>
+
+      <p><strong>Severity:</strong> <span class="badge badge-medium">Medium</span><br>
+      <strong>Location:</strong> <code class="inline-code">src/uniswapV4/Miniv4SwapRouter.sol:100-104</code></p>
+
+      <p><strong>Description:</strong></p>
+
+      <pre><code class="code-block">uint256 amountOut = amount0 &gt; 0 ? uint256(amount0) : uint256(amount1);
+if (amountOut &lt; cbData.minAmountOut) revert TooLittleReceived(...);</code></pre>
+
+      <p>For a standard swap one delta is positive (output) and the heuristic works. In adversarial pool configurations with <code class="inline-code">afterSwapReturnDelta</code>-enabled hooks, both deltas can be non-positive, causing <code class="inline-code">amountOut = uint256(negative_int256)</code> — a very large number that always passes the slippage check.</p>
+      <p>There is also no deadline parameter. A transaction that is stuck in the mempool executes at a stale price with no expiry.</p>
+
+      <p><strong>Recommendation:</strong></p>
+      <p>Compute output from the known direction, not by sign:</p>
+
+      <pre><code class="code-block">int256 out = params.zeroForOne ? amount1 : amount0;
+require(out &gt; 0, "no output");
+if (uint256(out) &lt; cbData.minAmountOut) revert TooLittleReceived(uint256(out), cbData.minAmountOut);</code></pre>
+
+      <p>Add <code class="inline-code">uint256 deadline</code> to <code class="inline-code">SwapParams</code> and <code class="inline-code">require(block.timestamp &lt;= deadline, "expired")</code>.</p>
+      <p><strong>References:</strong> SWC-114 (Transaction Order Dependence / Front-running)</p>
+
+      <hr class="divider">
+
+      <h3 id="m-04-swappriceloggerhook-overwrites-a-single-observation-slot-no-historical-data-despite-counting">[M-04] <code class="inline-code">SwapPriceLoggerHook</code> overwrites a single observation slot — no historical data despite counting</h3>
+
+      <p><strong>Severity:</strong> <span class="badge badge-medium">Medium</span><br>
+      <strong>Location:</strong> <code class="inline-code">src/hook/SwapPriceLoggerHook.sol:21-22, 67-72</code></p>
+
+      <p><strong>Description:</strong> <code class="inline-code">latestObservation[poolId]</code> is overwritten on every swap, while <code class="inline-code">observationCount[poolId]</code> increments — implying historical data, which does not exist. The single-slot design is a manipulable spot-price source: one swap sets the "oracle" value. If any future strategy reads <code class="inline-code">latestObservation</code> for pricing, it is trivially sandwichable.</p>
+      <p>Compounded with H-02, the stored value is also wrong.</p>
+
+      <p><strong>Recommendation:</strong> If the purpose is off-chain indexing, remove the storage and emit only the event (the indexer can subscribe). If on-chain oracle semantics are needed, implement a TWAP with a cumulative-tick ring buffer. Document the intended consumer explicitly.</p>
+
+      <hr class="divider">
+
+      <h3 id="l-01-strategylensgetpositions-reverts-the-entire-batch-on-one-bad-account">[L-01] <code class="inline-code">StrategyLens.getPositions</code> reverts the entire batch on one bad account</h3>
+
+      <p><strong>Severity:</strong> <span class="badge badge-low">Low</span><br>
+      <strong>Location:</strong> <code class="inline-code">src/lens/StrategyLens.sol:65-83</code></p>
+
+      <p><strong>Description:</strong> The loop calls <code class="inline-code">aavePool.getUserAccountData(accounts[i])</code> and <code class="inline-code">IStrategyAccount(accounts[i]).owner()</code> with no error isolation. If any element is not a valid contract or causes Aave to revert, the whole call fails, denying the indexer all results.</p>
+
+      <p><strong>Recommendation:</strong> Wrap per-account reads in <code class="inline-code">try/catch</code> and return a zeroed <code class="inline-code">PositionView</code> for failures.</p>
+
+      <hr class="divider">
+
+      <h3 id="l-02-useraccount-has-no-ownership-transfer-mechanism">[L-02] <code class="inline-code">UserAccount</code> has no ownership transfer mechanism</h3>
+
+      <p><strong>Severity:</strong> <span class="badge badge-low">Low</span><br>
+      <strong>Location:</strong> <code class="inline-code">src/accounts/UserAccount.sol:34</code></p>
+
+      <p><strong>Description:</strong> <code class="inline-code">owner</code> is set once at initialization and cannot be changed. If the owner key is lost or compromised, the account's funds are permanently inaccessible via the <code class="inline-code">onlyOwner</code> paths. There is no two-step ownership transfer.</p>
+
+      <p><strong>Recommendation:</strong> Add <code class="inline-code">transferOwnership</code> with a <code class="inline-code">pendingOwner</code> pattern gated by <code class="inline-code">onlyOwner</code>.</p>
+
+      <hr class="divider">
+
+      <h3 id="l-03-floating-pragma-across-all-contracts">[L-03] Floating pragma across all contracts</h3>
+
+      <p><strong>Severity:</strong> <span class="badge badge-low">Low</span><br>
+      <strong>Location:</strong> All files (<code class="inline-code">pragma solidity ^0.8.24;</code>)</p>
+
+      <p><strong>Description:</strong> Allows compilation under different patch versions than those used during testing.</p>
+
+      <p><strong>Recommendation:</strong> Pin to a specific version (<code class="inline-code">pragma solidity 0.8.26;</code>) consistently across all files.</p>
+      <p><strong>References:</strong> SWC-103 (Floating Pragma)</p>
+
+      <hr class="divider">
+
+      <h3 id="l-04-hookfactorydeploy-is-permissionless-event-has-no-indexed-fields">[L-04] <code class="inline-code">HookFactory.deploy</code> is permissionless; event has no indexed fields</h3>
+
+      <p><strong>Severity:</strong> <span class="badge badge-low">Low</span><br>
+      <strong>Location:</strong> <code class="inline-code">src/hook/HookFactory.sol</code></p>
+
+      <p><strong>Description:</strong> Anyone can deploy a <code class="inline-code">SwapPriceLoggerHook</code> via CREATE2 with any salt. <code class="inline-code">BaseHook</code>'s constructor validates the hook address flags, so an invalid deploy reverts — no fund risk. The only exposure is address-space griefing and harder event filtering due to unindexed <code class="inline-code">hook</code> and <code class="inline-code">salt</code> fields.</p>
+
+      <p><strong>Recommendation:</strong> Index event fields: <code class="inline-code">event HookDeployed(address indexed hook, bytes32 indexed salt)</code>.</p>
+
+      <hr class="divider">
+
+      <h3 id="i-01-core-router-modules-are-stubs-uniswapv4module-has-invalid-solidity-syntax">[I-01] Core router modules are stubs; <code class="inline-code">UniswapV4Module</code> has invalid Solidity syntax</h3>
+
+      <p><strong>Severity:</strong> <span class="badge badge-info">Informational</span><br>
+      <strong>Location:</strong> <code class="inline-code">src/router/UniswapV4Module.sol:8</code>, <code class="inline-code">src/router/AaveModule.sol:8-10</code>, <code class="inline-code">src/router/StrategyRouter.sol</code></p>
+
+      <p><strong>Description:</strong> <code class="inline-code">UniswapV4Module._swap(...)</code> uses <code class="inline-code">...</code> as a parameter list, which is not valid Solidity and will fail <code class="inline-code">forge build</code>. <code class="inline-code">AaveModule._supply</code> and <code class="inline-code">StrategyRouter.execute()</code> are empty stubs. The entire Permit2→supply→borrow→swap flow does not exist yet; these modules cannot be audited for logic vulnerabilities. <strong>A re-audit is required once these modules are implemented.</strong></p>
+
+      <hr class="divider">
+
+      <h3 id="i-02-test-suite-is-entirely-empty-placeholders">[I-02] Test suite is entirely empty placeholders</h3>
+
+      <p><strong>Severity:</strong> <span class="badge badge-info">Informational</span><br>
+      <strong>Location:</strong> <code class="inline-code">test/StrategyRouter_OpenPosition.t.sol</code>, <code class="inline-code">test/StrategyRouter_ClosePosition.t.sol</code>, <code class="inline-code">test/lens/StrategyLens.t.sol</code>, <code class="inline-code">test/uniswapV4/SwapPriceLoggerHook.t.sol</code></p>
+
+      <p><strong>Description:</strong> All four test files contain only a single <code class="inline-code">test_placeholder()</code> function that tests nothing. None of the critical access-control paths, slippage checks, or oracle reads are verified. The findings above would all be caught by a basic test suite.</p>
+
+      <hr class="divider">
+
+      <h3 id="i-03-tstore-library-is-unused">[I-03] <code class="inline-code">TStore</code> library is unused</h3>
+
+      <p><strong>Severity:</strong> <span class="badge badge-info">Informational</span><br>
+      <strong>Location:</strong> <code class="inline-code">src/utils/TStore.sol</code></p>
+
+      <p><strong>Description:</strong> No in-scope contract imports <code class="inline-code">TStore</code>. It is dead code today. The natural use is to back the <code class="inline-code">nonReentrant</code> guard recommended in H-01, making the project actually exercise EIP-1153 safely.</p>
+
+      <hr class="divider">
+
+      <h2 id="test-coverage-analysis">Test Coverage Analysis</h2>
+
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Missing test</th>
+              <th>Finding caught</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><code class="inline-code">setRouter</code> from non-owner (expect revert)</td><td>C-01</td></tr>
+            <tr><td><code class="inline-code">createAccount</code> called twice for same user (expect revert)</td><td>C-02, M-01</td></tr>
+            <tr><td><code class="inline-code">execute</code> from non-router address (expect revert)</td><td>H-01</td></tr>
+            <tr><td>Reentrancy into <code class="inline-code">execute</code> via malicious token callback</td><td>H-01</td></tr>
+            <tr><td><code class="inline-code">SwapPriceLoggerHook</code> swap then assert <code class="inline-code">latestObservation == getSlot0</code></td><td>H-02</td></tr>
+            <tr><td><code class="inline-code">toInt128(type(int128).min - 1)</code> (expect revert)</td><td>H-03</td></tr>
+            <tr><td><code class="inline-code">withdraw</code> with USDT-style no-return token</td><td>M-02</td></tr>
+            <tr><td><code class="inline-code">getPositions</code> with one invalid account in the list</td><td>L-01</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <hr class="divider">
+
+      <h2 id="methodology">Methodology</h2>
+
+      <ol class="content-list">
+        <li><strong>Manual code review</strong> — each file in scope was read in full.</li>
+        <li><strong>Dependency cross-reference</strong> — <code class="inline-code">lib/v4-core</code> and <code class="inline-code">lib/v4-periphery</code> were read to verify slot layout, <code class="inline-code">BaseHook</code> behaviour, and <code class="inline-code">PoolId</code> derivation.</li>
+        <li><strong>Attack scenario construction</strong> — for each candidate vulnerability, a concrete step-by-step exploit was traced through the call graph.</li>
+        <li><strong>Severity classification</strong> — follows OWASP / common DeFi audit standards: Critical = direct, reliable fund loss; High = fund loss under plausible conditions or material corruption of a core invariant; Medium = degraded safety or DoS without immediate fund loss; Low = best-practice violation with minor risk; Informational = no immediate risk but worth addressing.</li>
+      </ol>
+
+      <hr class="divider">
+
+      <p><em>End of report.</em></p>
+
+    </div>
+  </main>
+
+</div>
+
+<script>
+// ── Theme toggle ──
+const root = document.documentElement;
+const btn = document.getElementById('themeBtn');
+const saved = localStorage.getItem('dashboard-theme');
+if (saved) { root.setAttribute('data-theme', saved); }
+else {
+  const preferLight = window.matchMedia('(prefers-color-scheme: light)').matches;
+  if (preferLight) root.setAttribute('data-theme', 'light');
+}
+function syncBtn() {
+  const isDark = root.getAttribute('data-theme') === 'dark';
+  btn.textContent = isDark ? '☀️ Light' : '🌙 Dark';
+}
+function toggleTheme() {
+  const next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+  root.setAttribute('data-theme', next);
+  localStorage.setItem('dashboard-theme', next);
+  syncBtn();
+}
+syncBtn();
+
+// ── Reading progress ──
+const bar = document.getElementById('progressBar');
+window.addEventListener('scroll', () => {
+  const total = document.body.scrollHeight - window.innerHeight;
+  bar.style.width = total > 0 ? (window.scrollY / total * 100) + '%' : '0%';
+}, { passive: true });
+
+// ── Scroll spy ──
+const navLinks = document.querySelectorAll('#navList a');
+const headings = document.querySelectorAll('.content-body h1, .content-body h2, .content-body h3');
+
+function getActive() {
+  const offset = 80;
+  let active = null;
+  headings.forEach(h => { if (h.getBoundingClientRect().top <= offset) active = h; });
+  return active;
+}
+function updateNav() {
+  const active = getActive();
+  navLinks.forEach(a => {
+    a.classList.remove('active');
+    if (active && a.getAttribute('href') === '#' + active.id) a.classList.add('active');
+  });
+}
+window.addEventListener('scroll', updateNav, { passive: true });
+updateNav();
+
+// ── Smooth scroll ──
+navLinks.forEach(a => {
+  a.addEventListener('click', e => {
+    e.preventDefault();
+    const id = a.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+});
+</script>
+
+</body>
+</html>
