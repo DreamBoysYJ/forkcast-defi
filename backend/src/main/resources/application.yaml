@@ -5,8 +5,8 @@ spring:
 
   datasource:
     url: jdbc:postgresql://localhost:5432/forkcast_defi
-    username: forkcast_app
-    password: 1234
+    username: ${DB_USERNAME:forkcast_app}
+    password: ${DB_PASSWORD}
 
   jpa:
     hibernate:
