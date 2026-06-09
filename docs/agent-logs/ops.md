@@ -1,5 +1,31 @@
 # Ops Agent Log
 
+## 2026-06-09 DB 비용 절감 — HikariCP 풀 축소 + Cloud SQL 다운그레이드
+
+- 작업 목적
+  - 월 ~5만원 GCP 비용의 주범인 Cloud SQL을 낮춰 비용 절감. 라이브 앱은 유지.
+- 원인 분석
+  - 비용 진단(gcloud 조회): Cloud Run 2개(forcast-web, forkcast-backend)는 scale-to-zero라 ~0원, Load Balancer·고정 IP 없음(Compute API 미활성). **비용 전부가 Cloud SQL `db-g1-small`(24h 상시)**.
+  - SQL operations 이력: 2026-05-08 생성 직후 UPDATE 1건 → 처음 f1-micro로 만들었다가 g1-small로 올린 정황. 원인은 HikariCP 기본 풀 10개(idle 연결 = Postgres 프로세스 10개)가 f1-micro(0.6GB)를 압박한 것으로 추정.
+- 읽은 파일
+  - `backend/src/main/resources/application.yaml`
+  - `docs/ops/cloud-run-config.md`, `docs/ops/db-operations.md`, `docs/ops/cloud-scheduler-setup.md`
+- 변경한 파일
+  - `backend/src/main/resources/application.yaml` — `spring.datasource.hikari` 추가 (`maximum-pool-size: 3`, `minimum-idle: 1`)
+- 한 일
+  - 백엔드 재배포: `gcloud run deploy forkcast-backend --source backend/ --region asia-northeast3` → 리비전 `forkcast-backend-00012-vw4` (env/secret/cloudsql 설정 보존)
+  - DB 다운그레이드: `gcloud sql instances patch forkcast-defi-db --tier db-f1-micro` (재시작 ~11분, 데이터 보존)
+  - 검증 (`GET /api/positions/open`):
+    - Before(g1-small+풀10) 웜 ~88ms → After(f1-micro+풀3) 웜 ~103ms (+15ms, 무시 가능)
+    - 동시 5요청(풀3 초과): 전부 200, ~170ms, 풀 고갈 에러 없음 (큐잉 정상)
+    - 에러 로그: DB 재시작 윈도우(13:05~13:06)의 일회성 연결 끊김만, 이후 steady-state 깨끗. OOM 없음.
+  - 비용: 월 ~5만원 → ~1.5만원 (연 ~42만원 절감)
+- 왜 그렇게 했는지
+  - "DB만 다운"하면 풀 10개가 다시 0.6GB를 압박해 예전 불안정 재발 위험. 뿌리 원인(풀 크기)을 먼저 줄여야 f1-micro가 안정적. 토이 인덱서 부하(5분 job 2개 + 가끔 조회)엔 풀 3이면 충분.
+- 남은 문제
+  - `GET /api/system/sync-status`가 500(INTERNAL_ERROR) — 기존 버그, 프론트 미사용으로 앱 작동 무관. 미해결로 둠.
+  - f1-micro 체감 속도는 실제 프론트 UI 클릭으로 최종 확인 필요. 굼뜨면 풀 5로 상향 또는 티어 복구.
+
 ## 2026-05-22 백엔드 재배포 (Wave 1/2 수정 반영)
 
 ### 배포 내용

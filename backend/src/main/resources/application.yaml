@@ -7,6 +7,9 @@ spring:
     url: jdbc:postgresql://localhost:5432/forkcast_defi
     username: ${DB_USERNAME:forkcast_app}
     password: ${DB_PASSWORD}
+    hikari:
+      maximum-pool-size: 3
+      minimum-idle: 1
 
   jpa:
     hibernate:
