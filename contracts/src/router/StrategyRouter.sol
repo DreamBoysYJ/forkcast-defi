@@ -363,6 +363,7 @@ contract StrategyRouter is AaveModule, UniswapV4Module {
             uint256 lpBorrowTokenAmount,
             uint256 minExtraFromUser,
             uint256 maxExtraFromUser,
+            uint256 amount0FromLp,
             uint256 amount1FromLp
         )
     {

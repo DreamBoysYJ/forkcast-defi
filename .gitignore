@@ -15,6 +15,17 @@ broadcast/
 # Claude Code
 .claude/
 
+# Tool artifacts
+.omc/
+backend/.omc/
+ai-ready-audit-*.html
+ai-ready-audit-*.json
+docs/backend-audit.html
+docs/backend-audit.md
+
+# 개인 취업 자료 (이력서/포트폴리오 원본 — 전화번호 등 PII 포함, 커밋 금지)
+get_jobs/*.pdf
+
 # OS/IDE
 .DS_Store
 *.log

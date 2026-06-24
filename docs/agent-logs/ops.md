@@ -1,5 +1,105 @@
 # Ops Agent Log
 
+## 2026-06-09 DB 비용 절감 — HikariCP 풀 축소 + Cloud SQL 다운그레이드
+
+- 작업 목적
+  - 월 ~5만원 GCP 비용의 주범인 Cloud SQL을 낮춰 비용 절감. 라이브 앱은 유지.
+- 원인 분석
+  - 비용 진단(gcloud 조회): Cloud Run 2개(forcast-web, forkcast-backend)는 scale-to-zero라 ~0원, Load Balancer·고정 IP 없음(Compute API 미활성). **비용 전부가 Cloud SQL `db-g1-small`(24h 상시)**.
+  - SQL operations 이력: 2026-05-08 생성 직후 UPDATE 1건 → 처음 f1-micro로 만들었다가 g1-small로 올린 정황. 원인은 HikariCP 기본 풀 10개(idle 연결 = Postgres 프로세스 10개)가 f1-micro(0.6GB)를 압박한 것으로 추정.
+- 읽은 파일
+  - `backend/src/main/resources/application.yaml`
+  - `docs/ops/cloud-run-config.md`, `docs/ops/db-operations.md`, `docs/ops/cloud-scheduler-setup.md`
+- 변경한 파일
+  - `backend/src/main/resources/application.yaml` — `spring.datasource.hikari` 추가 (`maximum-pool-size: 3`, `minimum-idle: 1`)
+- 한 일
+  - 백엔드 재배포: `gcloud run deploy forkcast-backend --source backend/ --region asia-northeast3` → 리비전 `forkcast-backend-00012-vw4` (env/secret/cloudsql 설정 보존)
+  - DB 다운그레이드: `gcloud sql instances patch forkcast-defi-db --tier db-f1-micro` (재시작 ~11분, 데이터 보존)
+  - 검증 (`GET /api/positions/open`):
+    - Before(g1-small+풀10) 웜 ~88ms → After(f1-micro+풀3) 웜 ~103ms (+15ms, 무시 가능)
+    - 동시 5요청(풀3 초과): 전부 200, ~170ms, 풀 고갈 에러 없음 (큐잉 정상)
+    - 에러 로그: DB 재시작 윈도우(13:05~13:06)의 일회성 연결 끊김만, 이후 steady-state 깨끗. OOM 없음.
+  - 비용: 월 ~5만원 → ~1.5만원 (연 ~42만원 절감)
+- 왜 그렇게 했는지
+  - "DB만 다운"하면 풀 10개가 다시 0.6GB를 압박해 예전 불안정 재발 위험. 뿌리 원인(풀 크기)을 먼저 줄여야 f1-micro가 안정적. 토이 인덱서 부하(5분 job 2개 + 가끔 조회)엔 풀 3이면 충분.
+- 남은 문제
+  - `GET /api/system/sync-status`가 500(INTERNAL_ERROR) — 기존 버그, 프론트 미사용으로 앱 작동 무관. 미해결로 둠.
+  - f1-micro 체감 속도는 실제 프론트 UI 클릭으로 최종 확인 필요. 굼뜨면 풀 5로 상향 또는 티어 복구.
+
+## 2026-05-22 백엔드 재배포 (Wave 1/2 수정 반영)
+
+### 배포 내용
+
+- 브랜치: `fix/sync-infrastructure`
+- revision: `forkcast-backend-00011-bnc` (100% 트래픽)
+- URL: `https://forkcast-backend-799298411936.asia-northeast3.run.app`
+
+### 포함된 변경사항
+
+| 커밋 | 내용 |
+|------|------|
+| `261c23e` | C-3: DB 패스워드 환경변수화 (`${DB_PASSWORD}`) |
+| `334256a` | H-1: PendingTx TOCTOU 제거 (DB constraint → 409) |
+| `1d6c31d` | H-2: StrategyPosition TOCTOU 제거 (ON CONFLICT DO NOTHING) |
+| `951973a` | Wave 2: RPC/트랜잭션/타임스탬프/블록범위 개선 |
+
+### 추가된 시크릿
+
+- `DB_PASSWORD=forkcast-db-password:latest` (`--update-secrets`로 추가, 기존 secrets 유지)
+- 배포 전 Cloud Run에 `DB_PASSWORD`가 없었고 `application.yaml:9`에 기본값 없이 `${DB_PASSWORD}` 사용 → 미추가 시 기동 실패였음
+
+### 검증 결과
+
+- 헬스체크 `/actuator/health` → `UP`
+- CORS preflight `OPTIONS /api/positions/open` → `200`, `access-control-allow-origin: https://forcast-web-799298411936.asia-northeast3.run.app` 확인
+
+### 절차
+
+1. Cloud Scheduler (`forkcast-event-sync`, `forkcast-snapshot`) 일시 정지
+2. `gcloud run deploy --source backend/ --update-secrets "DB_PASSWORD=forkcast-db-password:latest"`
+3. 헬스/CORS 확인
+4. Cloud Scheduler 재개
+
+---
+
+## 2026-05-15 프론트 재배포 (State History UI 개선)
+
+### 배포 내용
+- 브랜치: `fix/web-state-history-ui`
+- 커밋: `d30dcd6` (fix(web): State History 모달 UI 개선)
+- 이미지: `gcr.io/forkcast-defi-demo/forcast-web:latest` (Cloud Build `3ec0be95`)
+- 서비스: `forcast-web` → revision `forcast-web-00010-k6b` (100% 트래픽)
+- URL: `https://forcast-web-799298411936.asia-northeast3.run.app`
+- HTTP 200 확인 완료
+
+### 배포 중 발생한 문제 — TypeScript 빌드 에러 3개
+
+첫 번째 `gcloud builds submit`이 실패했다. 이전 lint 수정 커밋(`7cb8adb`)과 UI 수정 커밋 사이에 생긴 TS 타입 에러 3개가 원인.
+
+| 파일 | 에러 | 수정 |
+|------|------|------|
+| `src/hooks/useStrategyPositionView.ts:169` | `raw`가 `unknown`으로 추론돼 `.core` 접근 불가 | `(r.result ?? r) as RawContractView`로 캐스팅 |
+| `src/hooks/useUserUniPositions.ts:119` | `.map()` 반환이 `unknown[]`인데 `Error[]`에 할당 | `.map((r) => r?.error as Error)` |
+| `src/lib/demoTrader.ts:208` | `decoded.args`를 `{ tick: bigint }`로 직접 캐스팅 불가 | `as unknown as { ... }`로 double assertion |
+
+`npx tsc --noEmit`으로 로컬 확인 후 재제출해서 성공.
+
+### 환경변수 주의
+- `NEXT_PUBLIC_BACKEND_URL`은 빌드 타임 arg로 주입 (`https://forkcast-backend-799298411936.asia-northeast3.run.app`)
+- Secrets: `HOUSE_PK`, `RPC_URL`, `DEMO_TRADER_PRIVATE_KEY` — `--set-secrets`로 기존과 동일하게 유지
+
+---
+
+## 2026-05-15 data retention 배포
+
+- revision `forkcast-backend-00009-jzb` → `forkcast-backend-00010-s8l`
+- 변경 내용: job_run 14일·position_snapshot 7일 retention 로직 추가
+- 00009는 `SnapshotWriteService.purgeOlderThan` 트랜잭션 전파 누락(`REQUIRED` → `REQUIRES_NEW` 수정 후 재배포)
+- 배포 방식: `gcloud run deploy forkcast-backend --source backend/ --region asia-northeast3`
+- 헬스 확인: `UP`
+
+---
+
 ## 2026-05-08 release/v2 배포 및 장애 대응
 
 ### 배포 내용

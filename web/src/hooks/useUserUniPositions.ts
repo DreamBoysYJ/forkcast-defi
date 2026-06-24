@@ -116,7 +116,7 @@ export function useUserUniPositions() {
   // allowFailure:true per-item 실패 노출
   const posItemErrors: Error[] = posResultsAny
     .filter((r) => r?.status === "failure")
-    .map((r) => r?.error);
+    .map((r) => r?.error as Error);
 
   if (posItemErrors.length > 0) {
     console.error("[useUserUniPositions] getUserUniPosition per-item failures:", posItemErrors);

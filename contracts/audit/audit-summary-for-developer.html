@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>보안 감사 요약 — 2년차 개발자를 위한 가이드</title>
+<style>
+/* ── Reset ── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* ── Theme tokens ── */
+:root {
+  --bg:           #0d1117;
+  --bg-card:      #161b22;
+  --bg-sidebar:   #0d1117;
+  --bg-header:    rgba(13,17,23,0.92);
+  --text:         #e6edf3;
+  --text-muted:   #7d8590;
+  --text-heading: #f0f6fc;
+  --border:       #30363d;
+  --accent:       #58a6ff;
+  --accent-hover: #79c0ff;
+  --code-bg:      #161b22;
+  --code-border:  #30363d;
+  --pre-bg:       #0d1117;
+  --table-head:   #161b22;
+  --table-alt:    #0d1117;
+  --blockquote-border: #388bfd;
+  --blockquote-bg: rgba(56,139,253,0.08);
+  --sidebar-w:    272px;
+  --header-h:     56px;
+  --shadow:       0 1px 3px rgba(0,0,0,0.4);
+}
+[data-theme="light"] {
+  --bg:           #ffffff;
+  --bg-card:      #f6f8fa;
+  --bg-sidebar:   #f6f8fa;
+  --bg-header:    rgba(255,255,255,0.92);
+  --text:         #1f2328;
+  --text-muted:   #57606a;
+  --text-heading: #1f2328;
+  --border:       #d0d7de;
+  --accent:       #0969da;
+  --accent-hover: #0550ae;
+  --code-bg:      #f6f8fa;
+  --code-border:  #d0d7de;
+  --pre-bg:       #f6f8fa;
+  --table-head:   #f6f8fa;
+  --table-alt:    #ffffff;
+  --blockquote-border: #0969da;
+  --blockquote-bg: rgba(9,105,218,0.06);
+  --shadow:       0 1px 3px rgba(0,0,0,0.12);
+}
+
+/* ── Base ── */
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--text);
+  background: var(--bg);
+  min-height: 100vh;
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { color: var(--accent-hover); text-decoration: underline; }
+
+/* ── Header ── */
+.site-header {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: var(--header-h);
+  background: var(--bg-header);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  z-index: 100;
+  gap: 16px;
+}
+.header-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-heading);
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.header-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.theme-toggle {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.theme-toggle:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ── Layout ── */
+.layout {
+  display: flex;
+  padding-top: var(--header-h);
+  min-height: 100vh;
+}
+
+/* ── Sidebar ── */
+.sidebar {
+  width: var(--sidebar-w);
+  min-width: var(--sidebar-w);
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--border);
+  position: fixed;
+  top: var(--header-h);
+  left: 0;
+  bottom: 0;
+  overflow-y: auto;
+  padding: 20px 0 40px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.sidebar::-webkit-scrollbar { width: 4px; }
+.sidebar::-webkit-scrollbar-track { background: transparent; }
+.sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+.sidebar-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  padding: 0 20px 8px;
+}
+.sidebar ul {
+  list-style: none;
+}
+.sidebar li a {
+  display: block;
+  padding: 4px 20px;
+  font-size: 13px;
+  color: var(--text-muted);
+  border-left: 2px solid transparent;
+  transition: all 0.12s;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.sidebar li a:hover,
+.sidebar li a.active {
+  color: var(--text);
+  border-left-color: var(--accent);
+  background: rgba(88,166,255,0.06);
+  text-decoration: none;
+}
+.sidebar li.nav-h1 > a { font-weight: 600; color: var(--text); font-size: 13px; }
+.sidebar li.nav-h2 > a { padding-left: 28px; }
+.sidebar li.nav-h3 > a { padding-left: 40px; font-size: 12px; }
+
+/* ── Main content ── */
+.main {
+  flex: 1;
+  margin-left: var(--sidebar-w);
+  padding: 40px 48px 80px;
+  max-width: calc(var(--sidebar-w) + 900px);
+  width: 100%;
+}
+.content-body { max-width: 860px; }
+
+/* ── Typography ── */
+.content-body h1 {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text-heading);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 12px;
+  margin: 32px 0 20px;
+  line-height: 1.3;
+}
+.content-body h1:first-child { margin-top: 0; }
+.content-body h2 {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-heading);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 8px;
+  margin: 36px 0 16px;
+}
+.content-body h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-heading);
+  margin: 28px 0 12px;
+}
+.content-body h4 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-heading);
+  margin: 20px 0 8px;
+}
+.content-body p { margin: 0 0 14px; }
+.content-body ul.content-list,
+.content-body ol.content-list {
+  margin: 0 0 14px 24px;
+}
+.content-body ul.content-list li,
+.content-body ol.content-list li {
+  margin: 4px 0;
+}
+.content-body strong { font-weight: 600; color: var(--text-heading); }
+.content-body hr.divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 32px 0;
+}
+
+/* ── Badges ── */
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.badge-critical { background: rgba(239,68,68,0.15); color: #f87171; border: 1px solid rgba(239,68,68,0.3); }
+.badge-high     { background: rgba(249,115,22,0.15); color: #fb923c; border: 1px solid rgba(249,115,22,0.3); }
+.badge-medium   { background: rgba(234,179,8,0.15);  color: #facc15; border: 1px solid rgba(234,179,8,0.3); }
+.badge-low      { background: rgba(59,130,246,0.15); color: #60a5fa; border: 1px solid rgba(59,130,246,0.3); }
+.badge-info     { background: rgba(107,114,128,0.15); color: #9ca3af; border: 1px solid rgba(107,114,128,0.3); }
+.badge-pass     { background: rgba(34,197,94,0.15);  color: #4ade80; border: 1px solid rgba(34,197,94,0.3); }
+.badge-fail     { background: rgba(239,68,68,0.15);  color: #f87171; border: 1px solid rgba(239,68,68,0.3); }
+.badge-warning  { background: rgba(234,179,8,0.15);  color: #facc15; border: 1px solid rgba(234,179,8,0.3); }
+
+[data-theme="light"] .badge-critical { background: #fee2e2; color: #dc2626; border-color: #fca5a5; }
+[data-theme="light"] .badge-high     { background: #ffedd5; color: #ea580c; border-color: #fdba74; }
+[data-theme="light"] .badge-medium   { background: #fef9c3; color: #ca8a04; border-color: #fde047; }
+[data-theme="light"] .badge-low      { background: #dbeafe; color: #2563eb; border-color: #93c5fd; }
+[data-theme="light"] .badge-info     { background: #f3f4f6; color: #4b5563; border-color: #d1d5db; }
+[data-theme="light"] .badge-pass     { background: #dcfce7; color: #16a34a; border-color: #86efac; }
+[data-theme="light"] .badge-fail     { background: #fee2e2; color: #dc2626; border-color: #fca5a5; }
+[data-theme="light"] .badge-warning  { background: #fef9c3; color: #ca8a04; border-color: #fde047; }
+
+/* ── Tables ── */
+.table-wrap {
+  overflow-x: auto;
+  margin: 16px 0 20px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+}
+.data-table th {
+  background: var(--table-head);
+  color: var(--text-heading);
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 10px 14px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.data-table td {
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+  line-height: 1.5;
+}
+.data-table tr:last-child td { border-bottom: none; }
+.data-table tr:nth-child(even) td { background: var(--table-alt); }
+.data-table tr:hover td { background: rgba(88,166,255,0.04); }
+
+/* ── Code ── */
+code.inline-code {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 12.5px;
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  color: #e06c75;
+}
+[data-theme="light"] code.inline-code { color: #d73a49; }
+
+pre {
+  background: var(--pre-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px 20px;
+  overflow-x: auto;
+  margin: 14px 0 20px;
+  box-shadow: var(--shadow);
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+pre::-webkit-scrollbar { height: 4px; }
+pre::-webkit-scrollbar-track { background: transparent; }
+pre::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+code.code-block {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #c9d1d9;
+  display: block;
+  white-space: pre;
+}
+[data-theme="light"] code.code-block { color: #24292f; }
+
+/* ── Blockquote / Callout ── */
+blockquote.callout {
+  border-left: 3px solid var(--blockquote-border);
+  background: var(--blockquote-bg);
+  border-radius: 0 6px 6px 0;
+  padding: 12px 18px;
+  margin: 14px 0 20px;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+blockquote.callout p { margin: 0; }
+blockquote.callout strong { color: var(--text); }
+
+/* ── Scroll spy indicator ── */
+.reading-progress {
+  position: fixed;
+  top: var(--header-h);
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--border);
+  z-index: 99;
+}
+.reading-progress-bar {
+  height: 100%;
+  background: var(--accent);
+  width: 0%;
+  transition: width 0.1s;
+}
+
+/* ── Responsive ── */
+@media (max-width: 768px) {
+  .sidebar { display: none; }
+  .main { margin-left: 0; padding: 24px 20px 60px; }
+}
+</style>
+</head>
+<body>
+
+<!-- Reading progress bar -->
+<div class="reading-progress"><div class="reading-progress-bar" id="progressBar"></div></div>
+
+<!-- Header -->
+<header class="site-header">
+  <span class="header-title">보안 감사 요약 — 2년차 개발자를 위한 가이드</span>
+  <span class="header-meta">audit-summary-for-developer.md &nbsp;·&nbsp; 2026-05-20 00:00</span>
+  <button class="theme-toggle" onclick="toggleTheme()" id="themeBtn">☀️ Light</button>
+</header>
+
+<!-- Layout -->
+<div class="layout">
+
+  <!-- Sidebar -->
+  <nav class="sidebar" id="sidebar">
+    <div class="sidebar-label">Contents</div>
+    <ul id="navList">
+      <li class="nav-h1"><a href="#security-audit-summary">보안 감사 요약 — 2년차 개발자를 위한 가이드</a></li>
+      <li class="nav-h2"><a href="#one-line-summary">한 줄 요약</a></li>
+      <li class="nav-h2"><a href="#all-findings">발견 항목 전체 현황</a></li>
+      <li class="nav-h2"><a href="#fix-now">지금 당장 고쳐야 할 것 (Critical / High)</a></li>
+      <li class="nav-h3"><a href="#c-01">C-01 — setRouter()에 잠금이 없다</a></li>
+      <li class="nav-h3"><a href="#c-02">C-02 — 아무나 남의 계정을 덮어쓸 수 있다</a></li>
+      <li class="nav-h3"><a href="#h-01">H-01 — UserAccount.execute()가 재진입 방어 없이 뭐든 실행한다</a></li>
+      <li class="nav-h3"><a href="#h-02">H-02 — 훅이 잘못된 슬롯을 읽어서 가격 데이터가 전부 엉터리다</a></li>
+      <li class="nav-h3"><a href="#h-03">H-03 — SafeCast.toInt128() 음수 체크 구멍</a></li>
+      <li class="nav-h2"><a href="#fix-later">나중에 개선할 것 (Medium / Low)</a></li>
+      <li class="nav-h2"><a href="#top5">수정 우선순위 Top 5</a></li>
+      <li class="nav-h2"><a href="#start-with-tests">테스트부터 시작하라</a></li>
+      <li class="nav-h2"><a href="#build-status">현재 빌드 상태</a></li>
+    </ul>
+  </nav>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="content-body" id="contentBody">
+
+      <h1 id="security-audit-summary">보안 감사 요약 — 2년차 개발자를 위한 가이드</h1>
+
+      <p><strong>감사일:</strong> 2026-05-20<br>
+      <strong>대상:</strong> <code class="inline-code">contracts/src/</code> 전체 프로덕션 솔리디티 파일</p>
+
+      <hr class="divider">
+
+      <h2 id="one-line-summary">한 줄 요약</h2>
+
+      <blockquote class="callout">
+        <p><code class="inline-code">AccountFactory</code>의 접근 제어가 없어서 <strong>지금 당장 누구나 모든 유저 계정을 탈취할 수 있다.</strong><br>
+        배포 전에 <span class="badge badge-critical">Critical</span> 2개는 무조건 고쳐야 한다.</p>
+      </blockquote>
+
+      <hr class="divider">
+
+      <h2 id="all-findings">발견 항목 전체 현황</h2>
+
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>심각도</th>
+              <th>한 줄 설명</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>C-01</td>
+              <td><span class="badge badge-critical">Critical</span></td>
+              <td><code class="inline-code">setRouter()</code>에 접근 제어 없음 — 누구나 라우터 교체 가능</td>
+            </tr>
+            <tr>
+              <td>C-02</td>
+              <td><span class="badge badge-critical">Critical</span></td>
+              <td><code class="inline-code">createAccount()</code>가 기존 계정을 덮어씀, 퍼미션도 없음</td>
+            </tr>
+            <tr>
+              <td>H-01</td>
+              <td><span class="badge badge-high">High</span></td>
+              <td><code class="inline-code">UserAccount.execute()</code>가 모든 외부 호출 허용, 재진입 방어 없음</td>
+            </tr>
+            <tr>
+              <td>H-02</td>
+              <td><span class="badge badge-high">High</span></td>
+              <td><code class="inline-code">SwapPriceLoggerHook</code>이 잘못된 슬롯 읽어서 가격 데이터 전부 쓰레기</td>
+            </tr>
+            <tr>
+              <td>H-03</td>
+              <td><span class="badge badge-high">High</span></td>
+              <td><code class="inline-code">SafeCast.toInt128()</code> 하한 체크 없어서 음수 값 묵인</td>
+            </tr>
+            <tr>
+              <td>M-01</td>
+              <td><span class="badge badge-medium">Medium</span></td>
+              <td><code class="inline-code">createAccount()</code>가 기존 계정 덮어쓰는 별도 그리핑 벡터</td>
+            </tr>
+            <tr>
+              <td>M-02</td>
+              <td><span class="badge badge-medium">Medium</span></td>
+              <td>표준 미지원 ERC20(USDT 등)에서 transfer/approve 실패</td>
+            </tr>
+            <tr>
+              <td>M-03</td>
+              <td><span class="badge badge-medium">Medium</span></td>
+              <td>스왑 라우터 슬리피지 체크 로직 구멍 + deadline 없음</td>
+            </tr>
+            <tr>
+              <td>M-04</td>
+              <td><span class="badge badge-medium">Medium</span></td>
+              <td>훅이 최신 가격 1개만 저장하는데 마치 오라클처럼 카운팅</td>
+            </tr>
+            <tr>
+              <td>L-01</td>
+              <td><span class="badge badge-low">Low</span></td>
+              <td><code class="inline-code">getPositions()</code> 계정 하나 실패하면 전체 배치 revert</td>
+            </tr>
+            <tr>
+              <td>L-02</td>
+              <td><span class="badge badge-low">Low</span></td>
+              <td><code class="inline-code">UserAccount</code> 오너 변경 불가</td>
+            </tr>
+            <tr>
+              <td>L-03</td>
+              <td><span class="badge badge-low">Low</span></td>
+              <td>pragma 버전이 <code class="inline-code">^</code>로 floating</td>
+            </tr>
+            <tr>
+              <td>L-04</td>
+              <td><span class="badge badge-low">Low</span></td>
+              <td><code class="inline-code">HookFactory</code> 퍼미션리스 배포, 이벤트 indexed 없음</td>
+            </tr>
+            <tr>
+              <td>I-01</td>
+              <td><span class="badge badge-info">Info</span></td>
+              <td>라우터 모듈 3개 전부 스텁, <code class="inline-code">UniswapV4Module</code>은 문법 오류로 컴파일도 안 됨</td>
+            </tr>
+            <tr>
+              <td>I-02</td>
+              <td><span class="badge badge-info">Info</span></td>
+              <td>테스트 파일 4개 전부 빈 placeholder</td>
+            </tr>
+            <tr>
+              <td>I-03</td>
+              <td><span class="badge badge-info">Info</span></td>
+              <td><code class="inline-code">TStore.sol</code> 아무데서도 import 안 함</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <hr class="divider">
+
+      <h2 id="fix-now">지금 당장 고쳐야 할 것 (Critical / High)</h2>
+
+      <h3 id="c-01">C-01 — <code class="inline-code">setRouter()</code>에 잠금이 없다</h3>
+
+      <p><strong>왜 위험한가?</strong><br>
+      <code class="inline-code">AccountFactory.setRouter()</code>는 누가 불러도 실행된다. 이 함수가 바꾸는 <code class="inline-code">router</code> 주소는, 새로 만들어지는 모든 <code class="inline-code">UserAccount</code>가 "이 주소만 믿겠다"고 등록하는 대상이다. <code class="inline-code">UserAccount.execute()</code>는 라우터가 시키는 것이라면 어떤 외부 호출이든 실행한다. 즉, 라우터를 바꾸는 순간 그 이후에 생성된 모든 계정이 공격자 손에 넘어간다.</p>
+
+      <p><strong>지금 코드:</strong></p>
+      <pre><code class="code-block">// AccountFactory.sol:12-14
+function setRouter(address _router) external {  // &lt;- 아무나 호출 가능!
+    router = _router;
+}</code></pre>
+
+      <p><strong>고치는 방법:</strong></p>
+      <pre><code class="code-block">address public immutable router;  // 변경 자체를 막는다
+address public immutable owner;
+
+constructor(address _router) {
+    router = _router;
+    owner = msg.sender;
+}</code></pre>
+
+      <p>라우터가 바뀔 일이 없다면 <code class="inline-code">immutable</code>로 만드는 게 제일 깔끔하다.</p>
+
+      <hr class="divider">
+
+      <h3 id="c-02">C-02 — 아무나 남의 계정을 덮어쓸 수 있다</h3>
+
+      <p><strong>왜 위험한가?</strong><br>
+      <code class="inline-code">createAccount(victim)</code>은 누구나 호출 가능하다. <code class="inline-code">accountOf[victim]</code>을 새 주소로 덮어쓴다. 피해자가 이미 돈을 넣어둔 원래 계정은 팩토리 매핑에서 사라지고, 프론트/인덱서는 새 계정(공격자 라우터를 가진)으로 유도된다.</p>
+
+      <p><strong>고치는 방법:</strong></p>
+      <pre><code class="code-block">function createAccount(address user) external returns (address) {
+    require(accountOf[user] == address(0), "already exists");  // &lt;- 한 줄 추가
+    // ...
+}</code></pre>
+
+      <p>추가로: <code class="inline-code">msg.sender == user</code>도 체크하면 자기 계정만 직접 만들 수 있어서 더 안전하다.</p>
+
+      <hr class="divider">
+
+      <h3 id="h-01">H-01 — <code class="inline-code">UserAccount.execute()</code>가 재진입 방어 없이 뭐든 실행한다</h3>
+
+      <p><strong>왜 위험한가?</strong><br>
+      "재진입(reentrancy)"은 외부 호출이 다시 내 함수를 부르는 패턴이다. 예를 들어 ERC777 같은 토큰은 <code class="inline-code">transfer</code> 중에 수신자에게 콜백을 날린다. 콜백 안에서 다시 <code class="inline-code">execute()</code>를 부를 수 있으면, 전송이 완료되기도 전에 잔액이 두 번 빠져나갈 수 있다.</p>
+
+      <p>현재 코드는 C-01이 해결되기 전까지 "라우터 = 공격자"이므로 이 취약점은 그 자체로 이미 <span class="badge badge-critical">Critical</span>이다.</p>
+
+      <p><strong>고치는 방법:</strong><br>
+      프로젝트에 이미 <code class="inline-code">TStore.sol</code>(EIP-1153 트랜지언트 스토리지)이 있는데 아무데서도 안 쓴다. 여기에 쓰면 딱 맞다:</p>
+
+      <pre><code class="code-block">bool private _entered;
+
+modifier nonReentrant() {
+    require(!_entered, "reentrant");
+    _entered = true;
+    _;
+    _entered = false;
+}
+
+function execute(address target, uint256 value, bytes calldata data)
+    external onlyRouter nonReentrant returns (bytes memory)
+{
+    // ...
+}</code></pre>
+
+      <p>더 장기적으로는 <code class="inline-code">execute()</code>를 <code class="inline-code">supply()</code>, <code class="inline-code">borrow()</code>, <code class="inline-code">swap()</code> 같은 타입화된 함수로 쪼개서, 실행 가능한 대상 자체를 화이트리스트로 잠그는 게 좋다.</p>
+
+      <hr class="divider">
+
+      <h3 id="h-02">H-02 — 훅이 잘못된 슬롯을 읽어서 가격 데이터가 전부 엉터리다</h3>
+
+      <p><strong>왜 위험한가?</strong><br>
+      <code class="inline-code">SwapPriceLoggerHook</code>은 스왑 후 현재 풀 가격을 기록해야 하는데, <code class="inline-code">extsload</code>에 넘기는 슬롯 주소가 틀렸다. 그 슬롯에는 실제 가격이 없으니, 온체인에 기록되는 모든 가격은 쓰레기 값이다. 지금은 인덱서/프론트에서만 이 값을 읽지만, 미래에 전략이 이 값을 기준으로 포지션을 조정하면 직접적인 자금 손실로 이어진다.</p>
+
+      <p><strong>고치는 방법:</strong><br>
+      v4가 제공하는 <code class="inline-code">StateLibrary</code>를 사용한다. 슬롯 계산을 직접 하지 않는다:</p>
+
+      <pre><code class="code-block">import {StateLibrary} from "v4-core/src/libraries/StateLibrary.sol";
+import {PoolIdLibrary} from "v4-core/src/types/PoolId.sol";
+
+using StateLibrary for IPoolManager;
+using PoolIdLibrary for PoolKey;
+
+// _afterSwap 내부에서:
+(uint160 sqrtPriceX96, int24 tick,,) = poolManager.getSlot0(key.toId());</code></pre>
+
+      <p><code class="inline-code">_readSlot0()</code>과 <code class="inline-code">_getCurrentPrice()</code> 함수는 삭제한다.</p>
+
+      <hr class="divider">
+
+      <h3 id="h-03">H-03 — <code class="inline-code">SafeCast.toInt128()</code> 음수 체크 구멍</h3>
+
+      <p><strong>왜 위험한가?</strong><br>
+      "SafeCast"라는 이름이 붙어 있지만, 실제로는 위에서만 막고 아래는 안 막는다. <code class="inline-code">int128</code>의 최솟값보다 더 작은 음수가 들어오면 조용히 통과되면서 완전히 다른 값으로 잘린다. v4 델타는 음수가 자주 나오므로, 미래 스왑 정산 코드에서 이 함수를 쓰면 금액 계산이 틀린다.</p>
+
+      <p><strong>고치는 방법:</strong></p>
+      <pre><code class="code-block">function toInt128(int256 x) internal pure returns (int128) {
+    if (x &gt; type(int128).max || x &lt; type(int128).min) revert Overflow();  // 양방향 체크
+    return int128(x);
+}</code></pre>
+
+      <hr class="divider">
+
+      <h2 id="fix-later">나중에 개선할 것 (Medium / Low)</h2>
+
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>빠른 설명</th>
+              <th>수정 난이도</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>M-02</td>
+              <td><code class="inline-code">SafeERC20</code> 써서 USDT 같은 비표준 토큰도 대응</td>
+              <td>쉬움 — import 하나</td>
+            </tr>
+            <tr>
+              <td>M-03</td>
+              <td>스왑 방향 기반으로 output 계산 + deadline 파라미터 추가</td>
+              <td>보통</td>
+            </tr>
+            <tr>
+              <td>M-04</td>
+              <td>훅 스토리지 목적 문서화 (인덱서용이면 이벤트만 남겨도 충분)</td>
+              <td>쉬움</td>
+            </tr>
+            <tr>
+              <td>L-01</td>
+              <td><code class="inline-code">getPositions()</code> try/catch로 배치 실패 격리</td>
+              <td>쉬움</td>
+            </tr>
+            <tr>
+              <td>L-02</td>
+              <td><code class="inline-code">transferOwnership</code> + 2-step 패턴 추가</td>
+              <td>보통</td>
+            </tr>
+            <tr>
+              <td>L-03</td>
+              <td><code class="inline-code">pragma solidity 0.8.26;</code>으로 버전 고정</td>
+              <td>매우 쉬움</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <hr class="divider">
+
+      <h2 id="top5">수정 우선순위 Top 5</h2>
+
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>순위</th>
+              <th>항목</th>
+              <th>이유</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1</td>
+              <td>C-01: <code class="inline-code">setRouter</code> 접근 제어 추가</td>
+              <td>고치기 쉽고, 파급력이 가장 크다</td>
+            </tr>
+            <tr>
+              <td>2</td>
+              <td>C-02: <code class="inline-code">createAccount</code> 덮어쓰기 방지</td>
+              <td>한 줄 추가로 해결</td>
+            </tr>
+            <tr>
+              <td>3</td>
+              <td>H-02: <code class="inline-code">_readSlot0</code> → <code class="inline-code">StateLibrary</code>로 교체</td>
+              <td>가격 데이터 신뢰성 전체가 여기 달려있음</td>
+            </tr>
+            <tr>
+              <td>4</td>
+              <td>H-01: <code class="inline-code">execute</code>에 <code class="inline-code">nonReentrant</code> + 타겟 화이트리스트</td>
+              <td>이미 있는 TStore 활용</td>
+            </tr>
+            <tr>
+              <td>5</td>
+              <td>H-03: <code class="inline-code">toInt128</code> 양방향 체크</td>
+              <td>한 줄 수정, v4 통합 후 직접 영향권</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <hr class="divider">
+
+      <h2 id="start-with-tests">테스트부터 시작하라</h2>
+
+      <p>현재 테스트 파일 4개가 전부 비어있다. 위 취약점들을 잡으려면 아래 테스트부터 작성하는 것을 추천한다:</p>
+
+      <pre><code class="code-block">// 우선순위 순서
+function test_setRouter_onlyOwner() { ... }               // C-01 검증
+function test_createAccount_cannot_overwrite() { ... }    // C-02 검증
+function test_execute_nonRouter_reverts() { ... }         // H-01 검증
+function test_hook_price_matches_getSlot0() { ... }       // H-02 검증
+function test_safeCast_toInt128_lower_bound() { ... }     // H-03 검증</code></pre>
+
+      <p>테스트가 통과해야 수정이 완료된 것이다. 테스트 없는 수정은 절반만 한 것이다.</p>
+
+      <hr class="divider">
+
+      <h2 id="build-status">현재 빌드 상태</h2>
+
+      <p><code class="inline-code">contracts/src/router/UniswapV4Module.sol</code>에 <code class="inline-code">function _swap(...)</code> 문법이 있어서 <code class="inline-code">forge build</code> 자체가 실패한다. 다른 것보다 이걸 먼저 고쳐야 빌드가 된다.</p>
+
+      <hr class="divider">
+
+      <p><em>전문 감사 리포트: <code class="inline-code">security-audit-report.md</code></em></p>
+
+    </div>
+  </main>
+
+</div>
+
+<script>
+// ── Theme toggle ──
+const root = document.documentElement;
+const btn = document.getElementById('themeBtn');
+const saved = localStorage.getItem('dashboard-theme');
+if (saved) { root.setAttribute('data-theme', saved); }
+else {
+  const preferLight = window.matchMedia('(prefers-color-scheme: light)').matches;
+  if (preferLight) root.setAttribute('data-theme', 'light');
+}
+function syncBtn() {
+  const isDark = root.getAttribute('data-theme') === 'dark';
+  btn.textContent = isDark ? '☀️ Light' : '🌙 Dark';
+}
+function toggleTheme() {
+  const next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+  root.setAttribute('data-theme', next);
+  localStorage.setItem('dashboard-theme', next);
+  syncBtn();
+}
+syncBtn();
+
+// ── Reading progress ──
+const bar = document.getElementById('progressBar');
+window.addEventListener('scroll', () => {
+  const total = document.body.scrollHeight - window.innerHeight;
+  bar.style.width = total > 0 ? (window.scrollY / total * 100) + '%' : '0%';
+}, { passive: true });
+
+// ── Scroll spy ──
+const navLinks = document.querySelectorAll('#navList a');
+const headings = document.querySelectorAll('.content-body h1, .content-body h2, .content-body h3');
+
+function getActive() {
+  const offset = 80;
+  let active = null;
+  headings.forEach(h => { if (h.getBoundingClientRect().top <= offset) active = h; });
+  return active;
+}
+function updateNav() {
+  const active = getActive();
+  navLinks.forEach(a => {
+    a.classList.remove('active');
+    if (active && a.getAttribute('href') === '#' + active.id) a.classList.add('active');
+  });
+}
+window.addEventListener('scroll', updateNav, { passive: true });
+updateNav();
+
+// ── Smooth scroll ──
+navLinks.forEach(a => {
+  a.addEventListener('click', e => {
+    e.preventDefault();
+    const id = a.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+});
+</script>
+
+</body>
+</html>
